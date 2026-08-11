@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#e84393">
+  <title>Админ — Заказы</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="admin-page">
+  <header>
+    <div class="container header-inner">
+      <a href="/" class="logo"><span class="logo-icon">🍦</span> Мороженое Избербаш</a>
+      <nav><span id="admin-name" class="user-info"></span></nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="admin-layout">
+      <div id="sidebar"></div>
+      <div class="admin-content">
+        <h1>Заказы</h1>
+        <div id="order-filters" class="category-filters" style="justify-content:flex-start;margin-bottom:16px">
+          <button class="filter-chip category-chip active" data-filter="all">Все</button>
+          <button class="filter-chip category-chip" data-filter="pending">Новые</button>
+          <button class="filter-chip category-chip" data-filter="accepted">Принятые</button>
+          <button class="filter-chip category-chip" data-filter="completed">Выполненные</button>
+          <button class="filter-chip category-chip" data-filter="archived">Архив</button>
+          <button class="filter-chip category-chip" data-filter="deleted">Удалённые</button>
+        </div>
+        <div id="orders-list"></div>
+      </div>
+    </div>
+  </main>
+
+  <script src="/js/common.js"></script>
+  <script src="/js/admin.js"></script>
+  <script>
+    let orderFilter = 'all';
+
+    function setupOrderFilters() {
+      document.querySelectorAll('#order-filters .filter-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          document.querySelectorAll('#order-filters .filter-chip').forEach(c => c.classList.remove('active'));
+          chip.classList.add('active');
+          orderFilter = chip.dataset.filter;
+          loadOrders();
+        });
+      });
+    }
+
+    async function setOrderStatus(orderId, status) {
+      await api(`/api/admin/orders/${orderId}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status }),
+      });
+      loadOrders();
+    }
+
+    async function loadOrders() {
+      const container = document.getElementById('orders-list');
+      const orders = await api(`/api/admin/orders?filter=${orderFilter}`);
+
+      if (!orders.length) {
+        container.innerHTML = '<p style="color:var(--muted)">Заказов нет</p>';
+        return;
+      }
+
+      container.innerHTML = orders.map(o => `
+        <div class="order-card ${o.deleted ? 'order-deleted' : ''} ${o.archived ? 'order-archived' : ''}">
+          <div class="order-header">
+            <strong>Заказ #${o.id}</strong>
+            <span class="badge ${o.deleted ? 'badge-deleted' : o.archived ? 'badge-archived' : orderStatusClass(o.status)}">
+              ${o.deleted ? 'Удалён' : o.archived ? 'В архиве' : escapeHtml(o.status_label || orderStatusLabel(o.status))}
+            </span>
+          </div>
+          <p class="order-meta order-meta-desktop">
+            ${escapeHtml(o.user_name)} (${escapeHtml(o.user_login)}) ·
+            ${formatDate(o.created_at)} · ${formatPrice(o.total)}
+            ${o.archived_at ? ` · Архив: ${formatDate(o.archived_at)}` : ''}
+          </p>
+          <div class="order-meta-block admin-mobile-only">
+            <div>${escapeHtml(o.user_name)} (${escapeHtml(o.user_login)})</div>
+            <div>${formatDate(o.created_at)} · ${formatPrice(o.total)}</div>
+            ${o.archived_at ? `<div>Архив: ${formatDate(o.archived_at)}</div>` : ''}
+          </div>
+          <ul class="order-items">
+            ${(o.items || []).map(i => `
+              <li>${escapeHtml(i.product_name)} — ${i.quantity} ${unitLabel(i.unit_type || 'pack')} × ${formatPrice(i.price)}</li>
+            `).join('')}
+          </ul>
+          ${!o.deleted && !o.archived ? `
+            <div class="order-actions">
+              ${o.status === 'pending' ? `<button type="button" class="btn btn-primary btn-sm" data-accept="${o.id}">Заказ принят</button>` : ''}
+              ${o.status === 'accepted' ? `<button type="button" class="btn btn-primary btn-sm" data-complete="${o.id}">Выполнен</button>` : ''}
+              ${o.status === 'pending' ? `<button type="button" class="btn btn-outline btn-sm" data-complete="${o.id}">Сразу выполнен</button>` : ''}
+              <button type="button" class="btn btn-danger btn-sm" data-delete="${o.id}">Удалить</button>
+            </div>
+          ` : o.deleted ? `
+            <div class="order-actions">
+              <button type="button" class="btn btn-outline btn-sm" data-restore="${o.id}">Восстановить</button>
+            </div>
+          ` : ''}
+        </div>
+      `).join('');
+
+      container.querySelectorAll('[data-accept]').forEach(btn => {
+        btn.addEventListener('click', () => setOrderStatus(parseInt(btn.dataset.accept), 'accepted'));
+      });
+
+      container.querySelectorAll('[data-complete]').forEach(btn => {
+        btn.addEventListener('click', () => setOrderStatus(parseInt(btn.dataset.complete), 'completed'));
+      });
+
+      container.querySelectorAll('[data-delete]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Удалить заказ?')) return;
+          await api(`/api/admin/orders/${btn.dataset.delete}`, { method: 'DELETE' });
+          loadOrders();
+        });
+      });
+
+      container.querySelectorAll('[data-restore]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          await api(`/api/admin/orders/${btn.dataset.restore}/restore`, { method: 'POST' });
+          loadOrders();
+        });
+      });
+    }
+
+    (async () => {
+      const admin = await requireAdmin();
+      if (!admin) return;
+
+      document.getElementById('admin-name').textContent = admin.name;
+      document.getElementById('sidebar').innerHTML = adminSidebar('orders');
+
+      document.getElementById('admin-logout')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        adminLogout();
+      });
+
+      setupOrderFilters();
+      loadOrders();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#e84393">
+  <title>Личный кабинет — Мороженое Избербаш</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header data-site-header data-nav="account"></header>
+
+  <main class="container account-page">
+    <h1 class="page-title">Личный кабинет</h1>
+    <div id="alert-area"></div>
+
+    <div id="account-info" class="account-card"></div>
+
+    <div class="account-tabs" role="tablist">
+      <button type="button" class="account-tab active" data-tab="orders" role="tab">Заказы</button>
+      <button type="button" class="account-tab" data-tab="history" role="tab">История заказов</button>
+    </div>
+
+    <div id="account-orders-area">
+      <div id="tab-orders" class="account-tab-panel active" role="tabpanel">
+        <div id="orders-list"></div>
+      </div>
+      <div id="tab-history" class="account-tab-panel" role="tabpanel" hidden>
+        <div id="history-list"></div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <p>Телефон: <a href="tel:+79034779706">+7 (903) 477-97-06</a></p>
+  </footer>
+
+  <script src="/js/common.js"></script>
+  <script src="/js/account.js"></script>
+</body>
+</html>

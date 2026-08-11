@@ -1,0 +1,419 @@
+let allProducts = [];
+
+let activeCategory = '';
+
+let searchQuery = '';
+
+let searchTimer = null;
+
+let currentUser = null;
+
+
+
+async function loadCategories() {
+
+  const container = document.getElementById('category-filters');
+
+  if (!container) return;
+
+
+
+  try {
+
+    const categories = await api('/api/categories');
+
+    container.innerHTML = `
+
+      <button class="category-chip active" data-filter="">Все</button>
+
+      <button class="category-chip category-chip-highlight" data-filter="new">Новинки</button>
+
+      <button class="category-chip category-chip-highlight" data-filter="sale">Акции</button>
+
+      ${categories.map(c => `
+
+        <button class="category-chip" data-filter="cat-${c.id}">${escapeHtml(c.name)}</button>
+
+      `).join('')}
+
+    `;
+
+
+
+    container.querySelectorAll('.category-chip').forEach(chip => {
+
+      chip.addEventListener('click', () => {
+
+        container.querySelectorAll('.category-chip').forEach(c => c.classList.remove('active'));
+
+        chip.classList.add('active');
+
+        activeCategory = chip.dataset.filter;
+
+        renderProducts();
+
+      });
+
+    });
+
+  } catch {
+
+    container.innerHTML = '';
+
+  }
+
+}
+
+
+
+function getFilteredProducts() {
+
+  let list = allProducts;
+
+
+
+  if (activeCategory === 'new') {
+
+    list = list.filter(p => p.is_new);
+
+  } else if (activeCategory === 'sale') {
+
+    list = list.filter(p => p.is_on_sale);
+
+  } else if (activeCategory.startsWith('cat-')) {
+
+    const catId = activeCategory.replace('cat-', '');
+
+    list = list.filter(p => productHasCategory(p, catId));
+
+  }
+
+
+
+  if (searchQuery) {
+
+    const q = searchQuery.toLowerCase();
+
+    list = list.filter(p =>
+
+      p.name.toLowerCase().includes(q) ||
+
+      (p.description || '').toLowerCase().includes(q) ||
+
+      productCategoryNames(p).some(name => name.toLowerCase().includes(q))
+
+    );
+
+  }
+
+
+
+  return list;
+
+}
+
+
+
+function renderHitSticker(p) {
+  return p.is_bestseller ? '<span class="product-hit-sticker">Хит продаж</span>' : '';
+}
+
+function renderSaleSticker(p) {
+  return p.is_on_sale ? '<span class="product-sale-sticker">Акция</span>' : '';
+}
+
+function renderProductCard(p) {
+
+  const imgUrl = p.images?.[0]?.url;
+  const imageUrls = (p.images || []).map(img => img.url);
+  const hitSticker = renderHitSticker(p);
+  const saleSticker = renderSaleSticker(p);
+
+  const img = imgUrl
+
+    ? `<div class="product-image-wrap" data-lightbox="${imgUrl}" data-lightbox-set='${JSON.stringify(imageUrls)}' data-alt="${escapeHtml(p.name)}">
+         <img class="product-image" src="${imgUrl}" alt="${escapeHtml(p.name)}" loading="lazy" decoding="async">
+         ${imageUrls.length > 1 ? `<span class="product-photo-count">${imageUrls.length} фото</span>` : ''}
+         ${hitSticker}
+         ${saleSticker}
+       </div>`
+
+    : `<div class="product-image-placeholder">${hitSticker}${saleSticker}🍦</div>`;
+
+
+
+  const pieceOption = p.allow_piece_sale
+
+    ? `<button type="button" class="unit-btn" data-unit="piece">Штучно</button>`
+
+    : `<button type="button" class="unit-btn" disabled title="Только упаковками">Штучно</button>`;
+
+
+
+  const adminBtns = currentUser?.is_admin ? `
+
+    <button type="button" class="btn btn-outline btn-sm" data-edit="${p.id}">Изменить</button>
+
+  ` : '';
+
+
+
+  return `
+
+    <article class="product-card" data-id="${p.id}">
+
+      ${img}
+
+      <div class="product-body">
+
+        ${productCategoryNames(p).length ? `
+          <div class="product-categories">
+            ${productCategoryNames(p).map(name => `<span class="product-category-tag">${escapeHtml(name)}</span>`).join('')}
+          </div>` : ''}
+
+        <div class="product-badges">
+
+          ${p.is_new ? '<span class="badge badge-new">Новинка</span>' : ''}
+
+          ${p.is_on_sale ? '<span class="badge badge-sale">Акция</span>' : ''}
+
+        </div>
+
+        <h2 class="product-name">${escapeHtml(p.name)}</h2>
+
+        <div class="product-meta">${formatProductMeta(p)}</div>
+
+        ${renderProductPrices(p)}
+
+        <p class="product-desc">${escapeHtml(p.description || '')}</p>
+        ${p.description ? '<button type="button" class="desc-toggle" data-desc-toggle hidden>Показать полностью</button>' : ''}
+
+        <div class="product-footer">
+
+          <div class="unit-select">
+
+            <button type="button" class="unit-btn active" data-unit="pack">Упаковка</button>
+
+            ${pieceOption}
+
+          </div>
+
+          <div class="qty-row">
+            <span class="qty-row-label">Кол-во:</span>
+            ${renderQtyStepper(1)}
+          </div>
+
+          <div class="product-actions">
+
+            <button class="btn btn-primary btn-sm" data-add="${p.id}">В корзину</button>
+
+            ${adminBtns}
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </article>`;
+
+}
+
+
+
+function renderProducts() {
+
+  const container = document.getElementById('products');
+
+  const products = getFilteredProducts();
+
+
+
+  if (!products.length) {
+
+    container.innerHTML = `
+
+      <div class="empty-state" style="grid-column:1/-1">
+
+        <h2>${searchQuery || activeCategory ? 'Ничего не найдено' : 'Товаров пока нет'}</h2>
+
+        <p>${searchQuery ? 'Попробуйте другой запрос' : 'Скоро появится вкусное мороженое!'}</p>
+
+      </div>`;
+
+    return;
+
+  }
+
+
+
+  container.innerHTML = products.map(renderProductCard).join('');
+
+  container.querySelectorAll('.product-card').forEach(card => {
+    const desc = card.querySelector('.product-desc');
+    const toggle = card.querySelector('[data-desc-toggle]');
+    if (desc && toggle) {
+      requestAnimationFrame(() => {
+        if (desc.scrollHeight > desc.clientHeight + 2) {
+          toggle.hidden = false;
+          toggle.addEventListener('click', () => {
+            const expanded = desc.classList.toggle('expanded');
+            toggle.textContent = expanded ? 'Свернуть' : 'Показать полностью';
+          });
+        }
+      });
+    }
+  });
+
+  container.querySelectorAll('[data-lightbox]').forEach(wrap => {
+    wrap.addEventListener('click', () => {
+      let urls = [wrap.dataset.lightbox];
+      try {
+        const parsed = JSON.parse(wrap.dataset.lightboxSet || '[]');
+        if (parsed.length) urls = parsed;
+      } catch {
+        /* keep single url */
+      }
+      openLightbox(urls, wrap.dataset.alt || '');
+    });
+  });
+
+
+
+  container.querySelectorAll('.product-card').forEach(card => {
+
+    const unitBtns = card.querySelectorAll('.unit-btn:not([disabled])');
+
+    let selectedUnit = 'pack';
+
+
+
+    unitBtns.forEach(btn => {
+
+      btn.addEventListener('click', () => {
+
+        unitBtns.forEach(b => b.classList.remove('active'));
+
+        btn.classList.add('active');
+
+        selectedUnit = btn.dataset.unit;
+
+      });
+
+    });
+
+
+
+    card.querySelector('[data-add]').addEventListener('click', (e) => {
+
+      const btn = e.target;
+
+      const qty = getQtyStepperValue(card.querySelector('.qty-stepper'));
+
+      Cart.add(parseInt(btn.dataset.add), qty, selectedUnit);
+
+      btn.textContent = '✓ Добавлено';
+
+      setTimeout(() => { btn.textContent = 'В корзину'; }, 1200);
+
+    });
+
+
+
+    card.querySelectorAll('.qty-step').forEach(stepBtn => {
+
+      stepBtn.addEventListener('click', () => {
+
+        changeQtyStepper(card.querySelector('.qty-stepper'), parseInt(stepBtn.dataset.step));
+
+      });
+
+    });
+
+
+
+    card.querySelector('[data-edit]')?.addEventListener('click', () => {
+
+      openProductEditModal(parseInt(card.dataset.id), allProducts, async () => {
+
+        await loadProducts();
+
+      });
+
+    });
+
+  });
+
+}
+
+
+
+async function loadProducts() {
+
+  const container = document.getElementById('products');
+
+
+
+  try {
+
+    allProducts = await api('/api/products');
+
+    renderProducts();
+
+  } catch (err) {
+
+    container.innerHTML = `<p class="alert alert-error">${err.message}</p>`;
+
+  }
+
+}
+
+
+
+function setupSearch() {
+
+  const input = initSearchClear(document.getElementById('search-input'));
+
+  if (!input) return;
+
+
+
+  input.addEventListener('input', () => {
+
+    clearTimeout(searchTimer);
+
+    searchTimer = setTimeout(() => {
+
+      searchQuery = input.value.trim();
+
+      renderProducts();
+
+    }, 300);
+
+  });
+
+}
+
+
+
+(async () => {
+
+  try {
+
+    currentUser = await api('/api/auth/me');
+
+  } catch {
+
+    currentUser = null;
+
+  }
+
+  loadCategories();
+
+  loadProducts();
+
+  setupSearch();
+
+})();
+
+

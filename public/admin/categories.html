@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#e84393">
+  <title>Админ — Категории | Мороженое Избербаш</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="admin-page">
+  <header>
+    <div class="container header-inner">
+      <a href="/" class="logo"><span class="logo-icon">🍦</span> Мороженое Избербаш</a>
+      <nav><span id="admin-name" class="user-info"></span></nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="admin-layout">
+      <div id="sidebar"></div>
+      <div class="admin-content">
+        <h1>Категории</h1>
+        <div id="alert-area"></div>
+
+        <form id="add-category-form" class="admin-inline-form">
+          <input name="name" placeholder="Название категории" required>
+          <button type="submit" class="btn btn-outline btn-sm">Добавить</button>
+        </form>
+
+        <div id="categories-list"></div>
+      </div>
+    </div>
+  </main>
+
+  <script src="/js/common.js"></script>
+  <script src="/js/admin.js"></script>
+  <script src="/js/admin-categories.js"></script>
+</body>
+</html>

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#e84393">
+  <title>Админ — Клиент</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="admin-page">
+  <header>
+    <div class="container header-inner">
+      <a href="/" class="logo"><span class="logo-icon">🍦</span> Мороженое Избербаш</a>
+      <nav><span id="admin-name" class="user-info"></span></nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="admin-layout">
+      <div id="sidebar"></div>
+      <div class="admin-content">
+        <a href="/admin/users.html" class="back-link">← К списку клиентов</a>
+        <div id="user-header"></div>
+        <div id="alert-area"></div>
+        <h2 class="admin-section-title">История заказов</h2>
+        <div id="user-orders"></div>
+      </div>
+    </div>
+  </main>
+
+  <script src="/js/common.js"></script>
+  <script src="/js/admin.js"></script>
+  <script>
+    function renderAdminOrderCard(o) {
+      const badges = [
+        `<span class="badge ${orderStatusClass(o.status)}">${escapeHtml(o.status_label || orderStatusLabel(o.status))}</span>`,
+      ];
+      if (o.deleted) badges.push('<span class="badge badge-deleted">Отменён</span>');
+      if (o.is_archived) badges.push('<span class="badge badge-archived">Архив</span>');
+
+      return `
+        <article class="order-card ${o.deleted ? 'order-deleted' : ''}">
+          <div class="order-header">
+            <div>
+              <strong>Заказ #${o.id}</strong>
+              <p class="order-date">${formatDate(o.created_at)}</p>
+            </div>
+            <div class="order-badges">${badges.join(' ')}</div>
+          </div>
+          <p class="order-meta">Сумма: ${formatPrice(o.total)}</p>
+          <ul class="order-items">
+            ${(o.items || []).map(i => `
+              <li>${escapeHtml(i.product_name)} — ${i.quantity} ${unitLabel(i.unit_type || 'pack')} × ${formatPrice(i.price)}</li>
+            `).join('')}
+          </ul>
+        </article>`;
+    }
+
+    (async () => {
+      const admin = await requireAdmin();
+      if (!admin) return;
+
+      const userId = new URLSearchParams(location.search).get('id');
+      if (!userId) {
+        location.href = '/admin/users.html';
+        return;
+      }
+
+      document.getElementById('admin-name').textContent = admin.name;
+      document.getElementById('sidebar').innerHTML = adminSidebar('users');
+
+      document.getElementById('admin-logout')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        adminLogout();
+      });
+
+      const headerEl = document.getElementById('user-header');
+      const ordersEl = document.getElementById('user-orders');
+
+      try {
+        const user = await api(`/api/admin/users/${userId}`);
+        headerEl.innerHTML = `
+          <h1>${escapeHtml(user.name)}</h1>
+          <p class="admin-user-meta">Логин: ${escapeHtml(user.login)} · ID ${user.id}</p>
+          <p class="admin-user-meta">Адрес: ${escapeHtml(user.address || '—')}</p>
+          <span class="badge ${user.deleted ? 'badge-deleted' : 'badge-active'}">
+            ${user.deleted ? 'Удалён' : 'Активен'}
+          </span>`;
+
+        const orders = await api(`/api/admin/users/${userId}/orders`);
+        if (!orders.length) {
+          ordersEl.innerHTML = '<p style="color:var(--muted)">Заказов нет</p>';
+          return;
+        }
+        ordersEl.innerHTML = orders.map(renderAdminOrderCard).join('');
+      } catch (err) {
+        headerEl.innerHTML = '<h1>Клиент</h1>';
+        ordersEl.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#e84393">
+  <title>О нас — Мороженое Избербаш</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header data-site-header data-nav="about"></header>
+
+  <main class="container">
+    <h1 class="page-title">О нас</h1>
+    <div id="about-content" class="account-card about-content">
+      <p style="color:var(--muted)">Загрузка...</p>
+    </div>
+    <p class="about-wa">
+      <a href="https://wa.me/79034779706" class="contact-link-wa" target="_blank" rel="noopener">💬 Написать в WhatsApp</a>
+    </p>
+  </main>
+
+  <footer class="site-footer">
+    <p>Телефон: <a href="tel:+79034779706">+7 (903) 477-97-06</a></p>
+  </footer>
+
+  <script src="/js/common.js"></script>
+  <script>
+    (async () => {
+      const el = document.getElementById('about-content');
+      try {
+        const data = await api('/api/site/about');
+        el.innerHTML = `<div class="about-text">${formatMultilineText(data.content)}</div>`;
+      } catch (err) {
+        el.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
+      }
+    })();
+  </script>
+</body>
+</html>

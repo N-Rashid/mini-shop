@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#e84393">
+  <title>Админ — Товары | Мороженое Избербаш</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="admin-page">
+  <header>
+    <div class="container header-inner">
+      <a href="/" class="logo"><span class="logo-icon">🍦</span> Мороженое Избербаш</a>
+      <nav><span id="admin-name" class="user-info"></span></nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="admin-layout">
+      <div id="sidebar"></div>
+      <div class="admin-content">
+        <h1>Товары</h1>
+        <div id="alert-area"></div>
+
+        <section class="admin-section">
+          <h2 class="admin-section-title">Добавить товар</h2>
+          <form id="add-product-form" enctype="multipart/form-data">
+            <div class="form-group">
+              <label for="add-product-name">Название *</label>
+              <input id="add-product-name" name="name" required>
+            </div>
+            <div class="form-group">
+              <label>Категории</label>
+              <p class="form-hint">Можно выбрать несколько — товар появится в каждой из них</p>
+              <div id="add-category-checkboxes"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Цена за штуку (₽)</label>
+                <input name="price_piece" type="number" step="0.01" min="0" value="0">
+              </div>
+              <div class="form-group">
+                <label>Цена за упаковку (₽) *</label>
+                <input name="price_pack" type="number" step="0.01" min="0" required>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Штук в упаковке</label>
+                <input name="pieces_per_pack" type="number" min="1" value="1">
+              </div>
+              <div class="form-group">
+                <label>Вес штуки (г)</label>
+                <input name="weight_grams" type="number" step="1" min="0" value="0">
+              </div>
+            </div>
+            <div class="form-check">
+              <input type="checkbox" name="allow_piece_sale" id="add-allow-piece" value="1">
+              <label for="add-allow-piece">Можно покупать штучно</label>
+            </div>
+            <div class="form-check">
+              <input type="checkbox" name="is_on_sale" id="add-is-sale" value="1">
+              <label for="add-is-sale">Акция</label>
+            </div>
+            <div class="form-check">
+              <input type="checkbox" name="is_bestseller" id="add-is-bestseller" value="1">
+              <label for="add-is-bestseller">Хит продаж</label>
+            </div>
+            <div id="add-sale-fields" class="form-row" style="display:none">
+              <div class="form-group">
+                <label>Акционная цена за штуку (₽)</label>
+                <input name="sale_price_piece" type="number" step="0.01" min="0">
+              </div>
+              <div class="form-group">
+                <label>Акционная цена за упаковку (₽)</label>
+                <input name="sale_price_pack" type="number" step="0.01" min="0">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Описание</label>
+              <textarea name="description"></textarea>
+            </div>
+            <div class="form-group">
+              <label>Фото (можно выбрать несколько)</label>
+              <input name="images" type="file" accept="image/*" multiple>
+              <p class="form-hint">Выберите сразу несколько файлов или добавляйте новые при редактировании товара.</p>
+            </div>
+            <button type="submit" class="btn btn-primary">Добавить товар</button>
+          </form>
+        </section>
+
+        <h2 class="admin-section-title">Список товаров</h2>
+        <div id="product-filters" class="category-filters" style="justify-content:flex-start;margin-bottom:12px">
+          <button class="filter-chip category-chip active" data-filter="all">Все</button>
+          <button class="filter-chip category-chip" data-filter="new">Новые</button>
+          <button class="filter-chip category-chip" data-filter="deleted">Удалённые</button>
+        </div>
+        <div class="admin-products-toolbar">
+          <input type="search" id="product-search" class="admin-products-search" placeholder="Поиск по названию..." autocomplete="off">
+          <select id="product-category-filter" class="admin-products-category-filter" aria-label="Категория">
+            <option value="">Все категории</option>
+          </select>
+        </div>
+        <div id="products-list"></div>
+      </div>
+    </div>
+  </main>
+
+  <div id="edit-modal" style="display:none"></div>
+
+  <script src="/js/common.js"></script>
+  <script src="/js/product-edit.js"></script>
+  <script src="/js/admin.js"></script>
+  <script src="/js/admin-products.js"></script>
+  <script>
+    document.getElementById('add-is-sale')?.addEventListener('change', (e) => {
+      document.getElementById('add-sale-fields').style.display = e.target.checked ? 'grid' : 'none';
+    });
+  </script>
+</body>
+</html>

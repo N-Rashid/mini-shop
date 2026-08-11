@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#e84393">
+  <title>Админ — Обзор</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="admin-page">
+  <header>
+    <div class="container header-inner">
+      <a href="/" class="logo"><span class="logo-icon">🍦</span> Мороженое Избербаш</a>
+      <nav><span id="admin-name" class="user-info"></span></nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="admin-layout">
+      <div id="sidebar"></div>
+      <div class="admin-content">
+        <h1>Обзор</h1>
+        <div id="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px">
+          <div style="background:var(--bg);padding:20px;border-radius:var(--radius)">
+            <div style="font-size:2rem;font-weight:700" id="stat-products">—</div>
+            <div style="color:var(--muted)">Товаров</div>
+          </div>
+          <div style="background:var(--bg);padding:20px;border-radius:var(--radius)">
+            <div style="font-size:2rem;font-weight:700" id="stat-users">—</div>
+            <div style="color:var(--muted)">Клиентов</div>
+          </div>
+          <div style="background:var(--bg);padding:20px;border-radius:var(--radius)">
+            <div style="font-size:2rem;font-weight:700" id="stat-orders">—</div>
+            <div style="color:var(--muted)">Заказов</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="/js/common.js"></script>
+  <script src="/js/admin.js"></script>
+  <script>
+    (async () => {
+      const admin = await requireAdmin();
+      if (!admin) return;
+
+      document.getElementById('admin-name').textContent = admin.name;
+      document.getElementById('sidebar').innerHTML = adminSidebar('dashboard');
+
+      document.getElementById('admin-logout')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        adminLogout();
+      });
+
+      const [products, users, orders] = await Promise.all([
+        api('/api/admin/products'),
+        api('/api/admin/users'),
+        api('/api/admin/orders'),
+      ]);
+
+      document.getElementById('stat-products').textContent =
+        products.filter(p => !p.deleted).length;
+      document.getElementById('stat-users').textContent =
+        users.filter(u => !u.deleted && !u.is_admin).length;
+      document.getElementById('stat-orders').textContent =
+        orders.filter(o => !o.deleted && !o.archived).length;
+    })();
+  </script>
+</body>
+</html>

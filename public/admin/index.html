@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#e84393">
+  <title>Админ-панель — Вход</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header>
+    <div class="container header-inner">
+      <a href="/" class="logo"><span class="logo-icon">🍦</span> Мороженое Избербаш</a>
+      <nav><a href="/">На сайт</a></nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="form-card">
+      <h1>Админ-панель</h1>
+      <div id="alert-area"></div>
+      <form id="admin-login-form">
+        <div class="form-group">
+          <label for="login">Логин</label>
+          <input type="text" id="login" required autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label for="password">Пароль</label>
+          <input type="password" id="password" required autocomplete="current-password">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%">Войти</button>
+      </form>
+      <p style="margin-top:20px;font-size:0.85rem;color:var(--muted)">
+        Демо: логин <strong>admin</strong>, пароль <strong>admin123</strong>
+      </p>
+    </div>
+  </main>
+
+  <script src="/js/common.js"></script>
+  <script>
+    async function checkAdmin() {
+      try {
+        await api('/api/admin/me');
+        location.href = '/admin/dashboard.html';
+      } catch {}
+    }
+
+    checkAdmin();
+
+    document.getElementById('admin-login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const alertArea = document.getElementById('alert-area');
+
+      try {
+        await api('/api/admin/login', {
+          method: 'POST',
+          body: JSON.stringify({
+            login: document.getElementById('login').value,
+            password: document.getElementById('password').value,
+          }),
+        });
+        location.href = '/admin/dashboard.html';
+      } catch (err) {
+        showAlert(alertArea, err.message, 'error');
+      }
+    });
+  </script>
+</body>
+</html>

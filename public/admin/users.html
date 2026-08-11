@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#e84393">
+  <title>Админ — Клиенты</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="admin-page">
+  <header>
+    <div class="container header-inner">
+      <a href="/" class="logo"><span class="logo-icon">🍦</span> Мороженое Избербаш</a>
+      <nav><span id="admin-name" class="user-info"></span></nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="admin-layout">
+      <div id="sidebar"></div>
+      <div class="admin-content">
+        <h1>Клиенты</h1>
+        <div id="alert-area"></div>
+
+        <section class="admin-section">
+          <h2 class="admin-section-title">Добавить клиента</h2>
+          <form id="add-user-form">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Имя *</label>
+                <input name="name" required>
+              </div>
+              <div class="form-group">
+                <label>Логин *</label>
+                <input name="login" required>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Пароль *</label>
+                <input name="password" type="password" required>
+              </div>
+              <div class="form-group">
+                <label>Адрес</label>
+                <input name="address">
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Добавить</button>
+          </form>
+        </section>
+
+        <div id="users-list"></div>
+      </div>
+    </div>
+  </main>
+
+  <script src="/js/common.js"></script>
+  <script src="/js/admin.js"></script>
+  <script>
+    function renderUserCard(u) {
+      return `
+        <article class="admin-card admin-card-compact ${u.deleted ? 'admin-card-muted' : ''}">
+          <div class="admin-card-row">
+            <div class="admin-card-main">
+              <strong class="admin-card-name">${escapeHtml(u.name)}</strong>
+              <span class="admin-card-meta">${escapeHtml(u.login)} · ID ${u.id}</span>
+            </div>
+            <span class="badge ${u.deleted ? 'badge-deleted' : 'badge-active'}">
+              ${u.deleted ? 'Удалён' : 'Активен'}
+            </span>
+          </div>
+          <p class="admin-card-meta" style="margin-bottom:8px">${escapeHtml(u.address || 'Адрес не указан')}</p>
+          ${!u.deleted ? `
+            <div class="admin-card-actions admin-card-actions-row">
+              <a href="/admin/user.html?id=${u.id}" class="btn btn-outline btn-sm">Заказы</a>
+              <button type="button" class="btn btn-danger btn-sm" data-delete="${u.id}">Удалить</button>
+            </div>
+          ` : `
+            <div class="admin-card-actions admin-card-actions-row">
+              <a href="/admin/user.html?id=${u.id}" class="btn btn-outline btn-sm">Заказы</a>
+            </div>
+          `}
+        </article>`;
+    }
+
+    async function loadUsers() {
+      const container = document.getElementById('users-list');
+      const users = await api('/api/admin/users');
+      const clients = users.filter(u => !u.is_admin);
+
+      if (!clients.length) {
+        container.innerHTML = '<p style="color:var(--muted)">Клиентов нет</p>';
+        return;
+      }
+
+      container.innerHTML = `
+        <div class="admin-desktop-only">
+          <table class="data-table data-table-compact">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Имя</th>
+                <th>Логин</th>
+                <th>Адрес</th>
+                <th>Статус</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${clients.map(u => `
+                <tr style="${u.deleted ? 'opacity:0.5' : ''}">
+                  <td>${u.id}</td>
+                  <td>${escapeHtml(u.name)}</td>
+                  <td>${escapeHtml(u.login)}</td>
+                  <td>${escapeHtml(u.address || '—')}</td>
+                  <td>
+                    <span class="badge ${u.deleted ? 'badge-deleted' : 'badge-active'}">
+                      ${u.deleted ? 'Удалён' : 'Активен'}
+                    </span>
+                  </td>
+                  <td class="data-table-actions">
+                    <a href="/admin/user.html?id=${u.id}" class="btn btn-outline btn-sm">Заказы</a>
+                    ${!u.deleted ? `
+                      <button type="button" class="btn btn-danger btn-sm" data-delete="${u.id}">Удалить</button>
+                    ` : ''}
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div class="admin-mobile-only admin-cards admin-cards-compact">
+          ${clients.map(renderUserCard).join('')}
+        </div>`;
+
+      container.querySelectorAll('[data-delete]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Удалить клиента?')) return;
+          await api(`/api/admin/users/${btn.dataset.delete}`, { method: 'DELETE' });
+          loadUsers();
+        });
+      });
+    }
+
+    (async () => {
+      const admin = await requireAdmin();
+      if (!admin) return;
+
+      document.getElementById('admin-name').textContent = admin.name;
+      document.getElementById('sidebar').innerHTML = adminSidebar('users');
+
+      document.getElementById('admin-logout')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        adminLogout();
+      });
+
+      document.getElementById('add-user-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const alertArea = document.getElementById('alert-area');
+        const fd = new FormData(e.target);
+
+        try {
+          await api('/api/admin/users', {
+            method: 'POST',
+            body: JSON.stringify(Object.fromEntries(fd)),
+          });
+          showAlert(alertArea, 'Клиент добавлен', 'success');
+          e.target.reset();
+          loadUsers();
+        } catch (err) {
+          showAlert(alertArea, err.message, 'error');
+        }
+      });
+
+      loadUsers();
+    })();
+  </script>
+</body>
+</html>

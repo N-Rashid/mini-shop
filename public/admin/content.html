@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#e84393">
+  <title>Админ — О нас</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="admin-page">
+  <header>
+    <div class="container header-inner">
+      <a href="/" class="logo"><span class="logo-icon">🍦</span> Мороженое Избербаш</a>
+      <nav><span id="admin-name" class="user-info"></span></nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="admin-layout">
+      <div id="sidebar"></div>
+      <div class="admin-content">
+        <h1>Страница «О нас»</h1>
+        <p style="color:var(--muted);margin-bottom:20px">Текст отображается на странице «О нас» в верхнем меню сайта.</p>
+        <div id="alert-area"></div>
+
+        <form id="about-form">
+          <div class="form-group">
+            <label>Текст о компании</label>
+            <textarea name="content" id="about-content" rows="14" required></textarea>
+          </div>
+          <button type="submit" class="btn btn-primary">Сохранить</button>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script src="/js/common.js"></script>
+  <script src="/js/admin.js"></script>
+  <script>
+    (async () => {
+      const admin = await requireAdmin();
+      if (!admin) return;
+
+      document.getElementById('admin-name').textContent = admin.name;
+      document.getElementById('sidebar').innerHTML = adminSidebar('content');
+
+      document.getElementById('admin-logout')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        adminLogout();
+      });
+
+      const textarea = document.getElementById('about-content');
+      try {
+        const data = await api('/api/admin/site/about');
+        textarea.value = data.content || '';
+      } catch (err) {
+        showAlert(document.getElementById('alert-area'), err.message, 'error');
+      }
+
+      document.getElementById('about-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const alertArea = document.getElementById('alert-area');
+        const content = textarea.value.trim();
+        try {
+          await api('/api/admin/site/about', {
+            method: 'PUT',
+            body: JSON.stringify({ content }),
+          });
+          showAlert(alertArea, 'Текст сохранён', 'success');
+        } catch (err) {
+          showAlert(alertArea, err.message, 'error');
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
