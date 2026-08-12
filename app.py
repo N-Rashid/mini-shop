@@ -1,5 +1,8 @@
 import os
+import shutil
 import sqlite3
+import subprocess
+import tempfile
 import uuid
 from datetime import datetime, timezone, timedelta
 from functools import wraps
@@ -21,14 +24,24 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'heif'}
 HEIC_EXTENSIONS = {'heic', 'heif'}
 HEIC_MIME_TYPES = {'image/heic', 'image/heif', 'image/heic-sequence'}
 
-HEIC_SUPPORTED = False
+HEIC_PILLOW = False
+HEIC_CONVERT_CMD = shutil.which('heif-convert')
+HEIC_IMPORT_ERROR = None
+Image = None
+
 try:
     from PIL import Image
-    import pillow_heif
-    pillow_heif.register_heif_opener()
-    HEIC_SUPPORTED = True
-except ImportError:
-    Image = None
+except ImportError as exc:
+    HEIC_IMPORT_ERROR = f'Pillow: {exc}'
+else:
+    try:
+        import pillow_heif
+        pillow_heif.register_heif_opener()
+        HEIC_PILLOW = True
+    except ImportError as exc:
+        HEIC_IMPORT_ERROR = f'pillow-heif: {exc}'
+
+HEIC_SUPPORTED = HEIC_PILLOW or bool(HEIC_CONVERT_CMD)
 ARCHIVE_ORDERS_AFTER_MONTHS = 5
 PURGE_ARCHIVED_AFTER_MONTHS = 1
 PURGE_DELETED_USERS_AFTER_DAYS = 7
@@ -737,16 +750,61 @@ def is_heic_upload(file):
     return mime in HEIC_MIME_TYPES
 
 
-def save_uploaded_product_image(file, product_id):
-    if is_heic_upload(file):
-        if not HEIC_SUPPORTED:
-            raise ValueError('HEIC не поддерживается на сервере. Установите Pillow и pillow-heif.')
+def convert_heic_via_cli(file, product_id):
+    unique_name = f'{product_id}-{uuid.uuid4().hex[:12]}.jpg'
+    out_path = os.path.join(UPLOADS_DIR, unique_name)
+    suffix = '.heic'
+    if file.filename and '.' in file.filename:
+        ext = file.filename.rsplit('.', 1)[1].lower()
+        if ext in HEIC_EXTENSIONS:
+            suffix = f'.{ext}'
+
+    fd, in_path = tempfile.mkstemp(suffix=suffix, dir=UPLOADS_DIR)
+    os.close(fd)
+    try:
+        file.save(in_path)
+        result = subprocess.run(
+            [HEIC_CONVERT_CMD, in_path, out_path],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        if result.returncode != 0 or not os.path.exists(out_path):
+            details = (result.stderr or result.stdout or '').strip()
+            raise ValueError(
+                f'Не удалось конвертировать HEIC{f": {details}" if details else ""}'
+            )
+        return unique_name
+    finally:
+        if os.path.exists(in_path):
+            os.remove(in_path)
+
+
+def save_heic_as_jpg(file, product_id):
+    if HEIC_PILLOW:
         img = Image.open(file.stream)
         if img.mode not in ('RGB', 'L'):
             img = img.convert('RGB')
         unique_name = f'{product_id}-{uuid.uuid4().hex[:12]}.jpg'
         img.save(os.path.join(UPLOADS_DIR, unique_name), 'JPEG', quality=88, optimize=True)
         return unique_name
+
+    if HEIC_CONVERT_CMD:
+        return convert_heic_via_cli(file, product_id)
+
+    hint = (
+        'На сервере: source venv/bin/activate && pip install -r requirements.txt '
+        'или apt install -y libheif-examples'
+    )
+    if HEIC_IMPORT_ERROR:
+        raise ValueError(f'HEIC не поддерживается ({HEIC_IMPORT_ERROR}). {hint}')
+    raise ValueError(f'HEIC не поддерживается. {hint}')
+
+
+def save_uploaded_product_image(file, product_id):
+    if is_heic_upload(file):
+        return save_heic_as_jpg(file, product_id)
 
     if not allowed_file(file.filename):
         return None
