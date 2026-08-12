@@ -76,6 +76,10 @@ async function openProductEditModal(productId, products, onSaved) {
           <input type="checkbox" name="is_bestseller" id="edit-is-bestseller" ${p.is_bestseller ? 'checked' : ''}>
           <label for="edit-is-bestseller">Хит продаж</label>
         </div>
+        <div class="form-check">
+          <input type="checkbox" name="out_of_stock" id="edit-out-of-stock" ${p.in_stock === false ? 'checked' : ''}>
+          <label for="edit-out-of-stock">Нет в наличии</label>
+        </div>
         <div id="edit-sale-fields" class="form-row" style="display:${p.is_on_sale ? 'grid' : 'none'}">
           <div class="form-group">
             <label>Акционная цена за штуку (₽)</label>
@@ -189,6 +193,7 @@ async function openProductEditModal(productId, products, onSaved) {
           allow_piece_sale: form.allow_piece_sale.checked,
           is_on_sale: form.is_on_sale.checked,
           is_bestseller: form.is_bestseller.checked,
+          in_stock: !form.out_of_stock.checked,
           sale_price_pack: form.is_on_sale.checked ? parseFloat(fd.get('sale_price_pack') || 0) : null,
           sale_price_piece: form.is_on_sale.checked ? parseFloat(fd.get('sale_price_piece') || 0) : null,
         }),

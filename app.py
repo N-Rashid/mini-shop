@@ -19,6 +19,7 @@ PUBLIC_DIR = os.path.join(BASE_DIR, 'public')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 ARCHIVE_ORDERS_AFTER_MONTHS = 5
 PURGE_ARCHIVED_AFTER_MONTHS = 1
+PURGE_DELETED_USERS_AFTER_DAYS = 7
 
 DEFAULT_ABOUT = '''Добро пожаловать в «Мороженое Избербаш»!
 
@@ -123,6 +124,7 @@ def migrate_db(conn):
         ('sale_price_piece', 'REAL'),
         ('is_bestseller', 'INTEGER DEFAULT 0'),
         ('sort_order', 'INTEGER DEFAULT 0'),
+        ('in_stock', 'INTEGER DEFAULT 1'),
     ]:
         add_column_if_missing(conn, 'products', col, typedef)
 
@@ -147,6 +149,9 @@ def migrate_db(conn):
     conn.execute(
         'UPDATE products SET price_piece = cost / MAX(pieces_per_box, 1) '
         'WHERE price_piece IS NULL AND cost IS NOT NULL'
+    )
+    conn.execute(
+        'UPDATE products SET in_stock = 1 WHERE in_stock IS NULL'
     )
 
     order_cols = table_columns(conn, 'order_items')
@@ -430,6 +435,27 @@ def purge_archived_orders(conn):
         conn.execute('DELETE FROM orders WHERE id = ?', (row['id'],))
 
 
+def purge_deleted_users(conn):
+    """Полностью удалить клиентов, помеченных удалёнными дольше недели."""
+    rows = conn.execute(
+        f'''
+        SELECT id FROM users
+        WHERE deleted_at IS NOT NULL
+          AND is_admin = 0
+          AND datetime(deleted_at) < datetime('now', '-{PURGE_DELETED_USERS_AFTER_DAYS} days')
+        '''
+    ).fetchall()
+    for row in rows:
+        user_id = row['id']
+        order_ids = conn.execute(
+            'SELECT id FROM orders WHERE user_id = ?', (user_id,)
+        ).fetchall()
+        for order in order_ids:
+            conn.execute('DELETE FROM order_items WHERE order_id = ?', (order['id'],))
+        conn.execute('DELETE FROM orders WHERE user_id = ?', (user_id,))
+        conn.execute('DELETE FROM users WHERE id = ?', (user_id,))
+
+
 def get_product_images(conn, product_id):
     rows = conn.execute(
         'SELECT id, filename FROM product_images WHERE product_id = ? AND deleted_at IS NULL',
@@ -518,6 +544,7 @@ def map_product(conn, row):
     d['allow_piece_sale'] = bool(d.get('allow_piece_sale', 0))
     d['is_on_sale'] = bool(d.get('is_on_sale', 0))
     d['is_bestseller'] = bool(d.get('is_bestseller', 0))
+    d['in_stock'] = bool(d.get('in_stock', 1))
     d['sale_price_pack'] = d.get('sale_price_pack')
     d['sale_price_piece'] = d.get('sale_price_piece')
     d['weight_grams'] = int(d.get('weight') or 0)
@@ -561,7 +588,7 @@ def product_price(product, unit_type):
 PRODUCT_SELECT = '''
     id, name, cost, pieces_per_box, weight, description, created_at,
     category_id, price_piece, price_pack, allow_piece_sale,
-    is_on_sale, sale_price_pack, sale_price_piece, is_bestseller, sort_order
+    is_on_sale, sale_price_pack, sale_price_piece, is_bestseller, sort_order, in_stock
 '''
 
 
@@ -585,6 +612,8 @@ def build_order_lines(conn, items):
             raise ValueError('Некорректный тип единицы')
         if unit_type == 'piece' and not product_row['allow_piece_sale']:
             raise ValueError(f'«{product_row["name"]}» продаётся только упаковками')
+        if not product_row['in_stock']:
+            raise ValueError(f'«{product_row["name"]}» нет в наличии')
 
         product = dict(product_row)
         price = product_price(product, unit_type)
@@ -1215,6 +1244,8 @@ def admin_list_products():
         sql += ' AND deleted_at IS NOT NULL'
     elif product_filter == 'new':
         sql += " AND deleted_at IS NULL AND datetime(created_at) >= datetime('now', '-14 days')"
+    elif product_filter == 'out_of_stock':
+        sql += ' AND deleted_at IS NULL AND COALESCE(in_stock, 1) = 0'
     else:
         sql += ' AND deleted_at IS NULL'
     sql += ' ORDER BY sort_order ASC, id ASC'
@@ -1240,6 +1271,7 @@ def admin_create_product():
     allow_piece = 1 if request.form.get('allow_piece_sale') in ('1', 'true', 'on') else 0
     is_on_sale = 1 if request.form.get('is_on_sale') in ('1', 'true', 'on') else 0
     is_bestseller = 1 if request.form.get('is_bestseller') in ('1', 'true', 'on') else 0
+    in_stock = 0 if request.form.get('out_of_stock') in ('1', 'true', 'on') else 1
 
     conn = get_db()
     next_sort = conn.execute(
@@ -1249,9 +1281,9 @@ def admin_create_product():
         INSERT INTO products (
             name, cost, pieces_per_box, weight, description, created_at,
             category_id, price_piece, price_pack, allow_piece_sale,
-            is_on_sale, sale_price_pack, sale_price_piece, is_bestseller, sort_order
+            is_on_sale, sale_price_pack, sale_price_piece, is_bestseller, sort_order, in_stock
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         name,
         float(price_pack),
@@ -1268,6 +1300,7 @@ def admin_create_product():
         float(request.form.get('sale_price_piece') or 0) if is_on_sale else None,
         is_bestseller,
         next_sort,
+        in_stock,
     ))
     product_id = cur.lastrowid
     set_product_categories(conn, product_id, category_ids)
@@ -1324,11 +1357,13 @@ def admin_update_product(product_id):
     category_ids = parse_category_ids_from_data(data)
     is_on_sale = 1 if data.get('is_on_sale') else 0
     is_bestseller = 1 if data.get('is_bestseller') else 0
+    in_stock = 1 if data.get('in_stock', True) else 0
     conn.execute('''
         UPDATE products SET
             name = ?, cost = ?, pieces_per_box = ?, weight = ?, description = ?,
             category_id = ?, price_piece = ?, price_pack = ?, allow_piece_sale = ?,
-            is_on_sale = ?, sale_price_pack = ?, sale_price_piece = ?, is_bestseller = ?
+            is_on_sale = ?, sale_price_pack = ?, sale_price_piece = ?, is_bestseller = ?,
+            in_stock = ?
         WHERE id = ?
     ''', (
         name,
@@ -1344,6 +1379,7 @@ def admin_update_product(product_id):
         float(data.get('sale_price_pack') or 0) if is_on_sale else None,
         float(data.get('sale_price_piece') or 0) if is_on_sale else None,
         is_bestseller,
+        in_stock,
         product_id,
     ))
     set_product_categories(conn, product_id, category_ids)
@@ -1409,12 +1445,26 @@ def admin_delete_image(image_id):
 @app.get('/api/admin/users')
 @require_admin
 def admin_list_users():
+    user_filter = request.args.get('filter', 'all')
     conn = get_db()
-    rows = conn.execute(
-        'SELECT id, name, address, login, is_admin, deleted_at FROM users ORDER BY id DESC'
-    ).fetchall()
+    purge_deleted_users(conn)
+    conn.commit()
+    sql = '''
+        SELECT id, name, address, login, is_admin, deleted_at
+        FROM users
+        WHERE is_admin = 0
+    '''
+    if user_filter == 'deleted':
+        sql += ' AND deleted_at IS NOT NULL'
+    else:
+        sql += ' AND deleted_at IS NULL'
+    sql += ' ORDER BY id DESC'
+    rows = conn.execute(sql).fetchall()
     conn.close()
-    return jsonify([{**row_to_dict(r), 'deleted': bool(r['deleted_at'])} for r in rows])
+    return jsonify([
+        {**row_to_dict(r), 'deleted': bool(r['deleted_at'])}
+        for r in rows
+    ])
 
 
 @app.post('/api/admin/users')
@@ -1472,6 +1522,80 @@ def admin_delete_user(user_id):
         conn.close()
         return jsonify({'error': 'Нельзя удалить администратора'}), 400
     soft_delete(conn, 'users', user_id)
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
+@app.put('/api/admin/users/<int:user_id>')
+@require_admin
+def admin_update_user(user_id):
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()
+    login = (data.get('login') or '').strip()
+    address = (data.get('address') or '').strip()
+    password = data.get('password') or ''
+
+    if not name or not login:
+        return jsonify({'error': 'Имя и логин обязательны'}), 400
+
+    conn = get_db()
+    user = conn.execute(
+        'SELECT id, is_admin, deleted_at FROM users WHERE id = ?', (user_id,)
+    ).fetchone()
+    if not user or user['is_admin']:
+        conn.close()
+        return jsonify({'error': 'Клиент не найден'}), 404
+
+    duplicate = conn.execute(
+        'SELECT id FROM users WHERE login = ? AND id != ? AND deleted_at IS NULL',
+        (login, user_id),
+    ).fetchone()
+    if duplicate:
+        conn.close()
+        return jsonify({'error': 'Логин уже занят'}), 400
+
+    try:
+        if password:
+            conn.execute('''
+                UPDATE users SET name = ?, login = ?, address = ?, password_hash = ?
+                WHERE id = ?
+            ''', (name, login, address, hash_password(password), user_id))
+        else:
+            conn.execute('''
+                UPDATE users SET name = ?, login = ?, address = ?
+                WHERE id = ?
+            ''', (name, login, address, user_id))
+        conn.commit()
+        conn.close()
+        return jsonify({'ok': True})
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'error': 'Логин уже занят'}), 400
+
+
+@app.post('/api/admin/users/<int:user_id>/restore')
+@require_admin
+def admin_restore_user(user_id):
+    conn = get_db()
+    user = conn.execute(
+        'SELECT id, is_admin, deleted_at FROM users WHERE id = ?', (user_id,)
+    ).fetchone()
+    if not user or user['is_admin'] or not user['deleted_at']:
+        conn.close()
+        return jsonify({'error': 'Клиент не найден'}), 404
+
+    duplicate = conn.execute('''
+        SELECT id FROM users
+        WHERE login = (SELECT login FROM users WHERE id = ?)
+          AND id != ?
+          AND deleted_at IS NULL
+    ''', (user_id, user_id)).fetchone()
+    if duplicate:
+        conn.close()
+        return jsonify({'error': 'Логин уже занят другим клиентом'}), 400
+
+    conn.execute('UPDATE users SET deleted_at = NULL WHERE id = ?', (user_id,))
     conn.commit()
     conn.close()
     return jsonify({'ok': True})

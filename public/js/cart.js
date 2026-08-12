@@ -17,10 +17,12 @@ function renderCartItem(product, item) {
   const unitType = item.unitType || 'pack';
   const price = getItemPrice(product, unitType);
   const lineTotal = price * item.quantity;
+  const unavailable = !isProductInStock(product);
 
   return `
-    <article class="cart-item" data-product="${product.id}" data-unit="${unitType}">
+    <article class="cart-item${unavailable ? ' cart-item-unavailable' : ''}" data-product="${product.id}" data-unit="${unitType}">
       <h3 class="cart-item-name">${escapeHtml(product.name)}</h3>
+      ${unavailable ? '<p class="cart-item-warning">Нет в наличии</p>' : ''}
       <p class="cart-item-sub">${unitLabel(unitType)} · ${formatPrice(price)} за ед.</p>
       <div class="cart-item-row">
         ${renderQtyStepper(item.quantity)}
@@ -35,10 +37,14 @@ function renderCartTableRow(product, item) {
   const unitType = item.unitType || 'pack';
   const price = getItemPrice(product, unitType);
   const lineTotal = price * item.quantity;
+  const unavailable = !isProductInStock(product);
 
   return `
-    <tr data-product="${product.id}" data-unit="${unitType}">
-      <td>${escapeHtml(product.name)}</td>
+    <tr class="${unavailable ? 'cart-item-unavailable' : ''}" data-product="${product.id}" data-unit="${unitType}">
+      <td>
+        ${escapeHtml(product.name)}
+        ${unavailable ? '<div class="cart-item-warning">Нет в наличии</div>' : ''}
+      </td>
       <td>${unitLabel(unitType)}</td>
       <td>${formatPrice(price)}</td>
       <td>${renderQtyStepper(item.quantity)}</td>
@@ -245,7 +251,11 @@ async function renderCart() {
     tableRows.push(renderCartTableRow(product, item));
   }
 
-  const canCheckout = loggedInUser && !loggedInUser.is_admin;
+  const hasUnavailable = cartItems.some(item => {
+    const product = cartProducts[item.productId];
+    return product && !isProductInStock(product);
+  });
+  const canCheckout = loggedInUser && !loggedInUser.is_admin && !hasUnavailable;
   document.body.classList.toggle('cart-has-hint', !canCheckout);
   const checkoutLabel = pendingOrder
     ? `Добавить к заказу #${pendingOrder.id}`
@@ -255,9 +265,15 @@ async function renderCart() {
       У вас заказ в ожидании #${pendingOrder.id}. Новые товары будут добавлены к нему.
     </div>
   ` : '';
+  const unavailableAlert = hasUnavailable ? `
+    <div class="alert alert-error cart-alert">
+      В корзине есть товары, которых нет в наличии. Удалите их, чтобы оформить заказ.
+    </div>
+  ` : '';
 
   container.innerHTML = `
     ${pendingAlert}
+    ${unavailableAlert}
     <div class="cart-layout cart-desktop-only">
       <table class="cart-table">
         <thead>

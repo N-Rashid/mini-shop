@@ -66,6 +66,10 @@
               <input type="checkbox" name="is_bestseller" id="add-is-bestseller" value="1">
               <label for="add-is-bestseller">Хит продаж</label>
             </div>
+            <div class="form-check">
+              <input type="checkbox" name="out_of_stock" id="add-out-of-stock" value="1">
+              <label for="add-out-of-stock">Нет в наличии</label>
+            </div>
             <div id="add-sale-fields" class="form-row" style="display:none">
               <div class="form-group">
                 <label>Акционная цена за штуку (₽)</label>
@@ -93,6 +97,7 @@
         <div id="product-filters" class="category-filters" style="justify-content:flex-start;margin-bottom:12px">
           <button class="filter-chip category-chip active" data-filter="all">Все</button>
           <button class="filter-chip category-chip" data-filter="new">Новые</button>
+          <button class="filter-chip category-chip" data-filter="out_of_stock">Нет в наличии</button>
           <button class="filter-chip category-chip" data-filter="deleted">Удалённые</button>
         </div>
         <div class="admin-products-toolbar">

@@ -22,7 +22,12 @@
         <h1>Клиенты</h1>
         <div id="alert-area"></div>
 
-        <section class="admin-section">
+        <div id="user-filters" class="category-filters" style="justify-content:flex-start;margin-bottom:16px">
+          <button class="filter-chip category-chip active" data-filter="all">Активные</button>
+          <button class="filter-chip category-chip" data-filter="deleted">Удалённые</button>
+        </div>
+
+        <section class="admin-section" id="add-user-section">
           <h2 class="admin-section-title">Добавить клиента</h2>
           <form id="add-user-form">
             <div class="form-row">
@@ -49,20 +54,112 @@
           </form>
         </section>
 
+        <div class="admin-users-toolbar">
+          <input type="search" id="user-search" class="admin-products-search" placeholder="Поиск по имени, логину, адресу..." autocomplete="off">
+        </div>
+
         <div id="users-list"></div>
       </div>
     </div>
   </main>
 
+  <div id="edit-user-modal" class="modal-overlay" style="display:none">
+    <div class="modal">
+      <h2>Редактировать клиента</h2>
+      <form id="edit-user-form">
+        <input type="hidden" id="edit-user-id">
+        <div class="form-group">
+          <label for="edit-user-name">Имя *</label>
+          <input id="edit-user-name" required>
+        </div>
+        <div class="form-group">
+          <label for="edit-user-login">Логин *</label>
+          <input id="edit-user-login" required>
+        </div>
+        <div class="form-group">
+          <label for="edit-user-address">Адрес</label>
+          <input id="edit-user-address">
+        </div>
+        <div class="form-group">
+          <label for="edit-user-password">Новый пароль</label>
+          <input id="edit-user-password" type="password" placeholder="Оставьте пустым, если не меняете">
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Сохранить</button>
+          <button type="button" class="btn btn-outline" id="edit-user-cancel">Отмена</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script src="/js/common.js"></script>
   <script src="/js/admin.js"></script>
   <script>
+    let userFilter = 'all';
+    let userSearchQuery = '';
+    let allUsers = [];
+
+    function userProfileUrl(id) {
+      return `/admin/user.html?id=${id}`;
+    }
+
+    function userNameLink(u) {
+      return `<a href="${userProfileUrl(u.id)}" class="admin-user-link">${escapeHtml(u.name)}</a>`;
+    }
+
+    function filterUsers(users) {
+      const q = userSearchQuery.trim().toLowerCase();
+      if (!q) return users;
+      return users.filter(u =>
+        (u.name || '').toLowerCase().includes(q) ||
+        (u.login || '').toLowerCase().includes(q) ||
+        (u.address || '').toLowerCase().includes(q) ||
+        String(u.id).includes(q)
+      );
+    }
+
+    function setupUserFilters() {
+      document.querySelectorAll('#user-filters .filter-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          document.querySelectorAll('#user-filters .filter-chip').forEach(c => c.classList.remove('active'));
+          chip.classList.add('active');
+          userFilter = chip.dataset.filter;
+          userSearchQuery = '';
+          const searchInput = document.getElementById('user-search');
+          if (searchInput) {
+            searchInput.value = '';
+            searchInput._syncSearchClear?.();
+          }
+          document.getElementById('add-user-section').style.display =
+            userFilter === 'deleted' ? 'none' : '';
+          loadUsers();
+        });
+      });
+    }
+
+    function renderUserActions(u) {
+      const profileBtn = `<a href="${userProfileUrl(u.id)}" class="btn btn-outline btn-sm">Профиль</a>`;
+      if (u.deleted) {
+        return `
+          <div class="admin-card-actions admin-card-actions-row">
+            ${profileBtn}
+            <button type="button" class="btn btn-primary btn-sm" data-restore="${u.id}">Восстановить</button>
+          </div>`;
+      }
+      return `
+        <div class="admin-card-actions admin-card-actions-row">
+          ${profileBtn}
+          <button type="button" class="btn btn-outline btn-sm" data-edit="${u.id}">Изменить</button>
+          <button type="button" class="btn btn-danger btn-sm" data-delete="${u.id}">Удалить</button>
+        </div>`;
+    }
+
     function renderUserCard(u) {
       return `
         <article class="admin-card admin-card-compact ${u.deleted ? 'admin-card-muted' : ''}">
           <div class="admin-card-row">
             <div class="admin-card-main">
-              <strong class="admin-card-name">${escapeHtml(u.name)}</strong>
+              <strong class="admin-card-name">${userNameLink(u)}</strong>
               <span class="admin-card-meta">${escapeHtml(u.login)} · ID ${u.id}</span>
             </div>
             <span class="badge ${u.deleted ? 'badge-deleted' : 'badge-active'}">
@@ -70,26 +167,38 @@
             </span>
           </div>
           <p class="admin-card-meta" style="margin-bottom:8px">${escapeHtml(u.address || 'Адрес не указан')}</p>
-          ${!u.deleted ? `
-            <div class="admin-card-actions admin-card-actions-row">
-              <a href="/admin/user.html?id=${u.id}" class="btn btn-outline btn-sm">Заказы</a>
-              <button type="button" class="btn btn-danger btn-sm" data-delete="${u.id}">Удалить</button>
-            </div>
-          ` : `
-            <div class="admin-card-actions admin-card-actions-row">
-              <a href="/admin/user.html?id=${u.id}" class="btn btn-outline btn-sm">Заказы</a>
-            </div>
-          `}
+          ${u.deleted && u.deleted_at ? `<p class="admin-card-meta">Удалён: ${formatDate(u.deleted_at)}</p>` : ''}
+          ${renderUserActions(u)}
         </article>`;
     }
 
-    async function loadUsers() {
-      const container = document.getElementById('users-list');
-      const users = await api('/api/admin/users');
-      const clients = users.filter(u => !u.is_admin);
+    function openEditModal(user) {
+      document.getElementById('edit-user-id').value = user.id;
+      document.getElementById('edit-user-name').value = user.name;
+      document.getElementById('edit-user-login').value = user.login;
+      document.getElementById('edit-user-address').value = user.address || '';
+      document.getElementById('edit-user-password').value = '';
+      document.getElementById('edit-user-modal').style.display = 'flex';
+    }
 
-      if (!clients.length) {
-        container.innerHTML = '<p style="color:var(--muted)">Клиентов нет</p>';
+    function closeEditModal() {
+      document.getElementById('edit-user-modal').style.display = 'none';
+      document.getElementById('edit-user-form').reset();
+    }
+
+    function renderUsersList() {
+      const container = document.getElementById('users-list');
+      const users = filterUsers(allUsers);
+
+      if (!allUsers.length) {
+        container.innerHTML = `<p style="color:var(--muted)">${
+          userFilter === 'deleted' ? 'Удалённых клиентов нет' : 'Клиентов нет'
+        }</p>`;
+        return;
+      }
+
+      if (!users.length) {
+        container.innerHTML = '<p style="color:var(--muted)">Ничего не найдено</p>';
         return;
       }
 
@@ -107,22 +216,26 @@
               </tr>
             </thead>
             <tbody>
-              ${clients.map(u => `
+              ${users.map(u => `
                 <tr style="${u.deleted ? 'opacity:0.5' : ''}">
                   <td>${u.id}</td>
-                  <td>${escapeHtml(u.name)}</td>
+                  <td>${userNameLink(u)}</td>
                   <td>${escapeHtml(u.login)}</td>
                   <td>${escapeHtml(u.address || '—')}</td>
                   <td>
                     <span class="badge ${u.deleted ? 'badge-deleted' : 'badge-active'}">
                       ${u.deleted ? 'Удалён' : 'Активен'}
                     </span>
+                    ${u.deleted && u.deleted_at ? `<div class="admin-card-meta">${formatDate(u.deleted_at)}</div>` : ''}
                   </td>
                   <td class="data-table-actions">
-                    <a href="/admin/user.html?id=${u.id}" class="btn btn-outline btn-sm">Заказы</a>
-                    ${!u.deleted ? `
+                    <a href="${userProfileUrl(u.id)}" class="btn btn-outline btn-sm">Профиль</a>
+                    ${u.deleted ? `
+                      <button type="button" class="btn btn-primary btn-sm" data-restore="${u.id}">Восстановить</button>
+                    ` : `
+                      <button type="button" class="btn btn-outline btn-sm" data-edit="${u.id}">Изменить</button>
                       <button type="button" class="btn btn-danger btn-sm" data-delete="${u.id}">Удалить</button>
-                    ` : ''}
+                    `}
                   </td>
                 </tr>
               `).join('')}
@@ -130,16 +243,43 @@
           </table>
         </div>
         <div class="admin-mobile-only admin-cards admin-cards-compact">
-          ${clients.map(renderUserCard).join('')}
+          ${users.map(renderUserCard).join('')}
         </div>`;
 
+      bindUserActions(container, users);
+    }
+
+    function bindUserActions(container, users) {
       container.querySelectorAll('[data-delete]').forEach(btn => {
         btn.addEventListener('click', async () => {
-          if (!confirm('Удалить клиента?')) return;
+          if (!confirm('Переместить клиента в удалённые? В течение недели его можно восстановить.')) return;
           await api(`/api/admin/users/${btn.dataset.delete}`, { method: 'DELETE' });
           loadUsers();
         });
       });
+
+      container.querySelectorAll('[data-restore]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          try {
+            await api(`/api/admin/users/${btn.dataset.restore}/restore`, { method: 'POST' });
+            loadUsers();
+          } catch (err) {
+            showAlert(document.getElementById('alert-area'), err.message, 'error');
+          }
+        });
+      });
+
+      container.querySelectorAll('[data-edit]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const user = allUsers.find(u => String(u.id) === btn.dataset.edit);
+          if (user) openEditModal(user);
+        });
+      });
+    }
+
+    async function loadUsers() {
+      allUsers = await api(`/api/admin/users?filter=${userFilter}`);
+      renderUsersList();
     }
 
     (async () => {
@@ -148,10 +288,47 @@
 
       document.getElementById('admin-name').textContent = admin.name;
       document.getElementById('sidebar').innerHTML = adminSidebar('users');
+      setupUserFilters();
+
+      const searchInput = initSearchClear(document.getElementById('user-search'));
+      searchInput?.addEventListener('input', (e) => {
+        userSearchQuery = e.target.value;
+        renderUsersList();
+      });
 
       document.getElementById('admin-logout')?.addEventListener('click', (e) => {
         e.preventDefault();
         adminLogout();
+      });
+
+      document.getElementById('edit-user-cancel').addEventListener('click', closeEditModal);
+      document.getElementById('edit-user-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'edit-user-modal') closeEditModal();
+      });
+
+      document.getElementById('edit-user-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const alertArea = document.getElementById('alert-area');
+        const userId = document.getElementById('edit-user-id').value;
+        const payload = {
+          name: document.getElementById('edit-user-name').value.trim(),
+          login: document.getElementById('edit-user-login').value.trim(),
+          address: document.getElementById('edit-user-address').value.trim(),
+        };
+        const password = document.getElementById('edit-user-password').value;
+        if (password) payload.password = password;
+
+        try {
+          await api(`/api/admin/users/${userId}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+          });
+          showAlert(alertArea, 'Клиент обновлён', 'success');
+          closeEditModal();
+          loadUsers();
+        } catch (err) {
+          showAlert(alertArea, err.message, 'error');
+        }
       });
 
       document.getElementById('add-user-form').addEventListener('submit', async (e) => {

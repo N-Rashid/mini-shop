@@ -256,6 +256,10 @@ function initSearchClear(input) {
   return input;
 }
 
+function isProductInStock(product) {
+  return product?.in_stock !== false;
+}
+
 function unitLabel(unitType) {
   return unitType === 'piece' ? 'шт.' : 'уп.';
 }

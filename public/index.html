@@ -21,6 +21,31 @@
       <div id="category-filters" class="category-filters"></div>
     </section>
 
+    <div class="catalog-toolbar">
+      <div class="catalog-filter-dropdown" id="catalog-filter-dropdown">
+        <button type="button" class="catalog-filter-toggle" id="catalog-filter-toggle" aria-expanded="false" aria-haspopup="true">
+          <span class="catalog-filter-toggle-icon" aria-hidden="true"></span>
+          <span id="catalog-filter-label">Фильтр</span>
+          <span class="catalog-filter-chevron" aria-hidden="true"></span>
+        </button>
+        <div class="catalog-filter-menu" id="catalog-filter-menu" hidden>
+          <div class="catalog-filter-section">
+            <p class="catalog-filter-section-title">Показать</p>
+            <button type="button" class="catalog-filter-option active" data-tag="">Все товары</button>
+            <button type="button" class="catalog-filter-option" data-tag="hit">Хит продаж</button>
+            <button type="button" class="catalog-filter-option" data-tag="new">Новинки</button>
+            <button type="button" class="catalog-filter-option" data-tag="sale">Акции</button>
+          </div>
+          <div class="catalog-filter-section">
+            <p class="catalog-filter-section-title">Сортировка</p>
+            <button type="button" class="catalog-filter-option active" data-sort="default">Как в каталоге</button>
+            <button type="button" class="catalog-filter-option" data-sort="date_desc">Сначала новые</button>
+            <button type="button" class="catalog-filter-option" data-sort="date_asc">Сначала старые</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="products" class="products-grid">
       <p style="color:var(--muted);grid-column:1/-1;text-align:center">Загрузка...</p>
     </div>

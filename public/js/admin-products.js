@@ -151,6 +151,7 @@ function productBadges(p) {
   else if (p.is_new) badges.push('<span class="badge badge-new">Новый</span>');
   if (p.is_on_sale) badges.push('<span class="badge badge-sale">Акция</span>');
   if (p.is_bestseller) badges.push('<span class="badge badge-hit">Хит</span>');
+  if (p.in_stock === false) badges.push('<span class="badge badge-oos">Нет в наличии</span>');
   if (p.allow_piece_sale) badges.push('<span class="badge badge-piece">Штучно</span>');
   return badges.join(' ');
 }
@@ -163,7 +164,7 @@ function renderProductCard(p, sortable, num) {
   const categoryLabel = productCategoryNames(p).join(', ') || '—';
 
   return `
-    <article class="admin-card admin-card-compact ${p.deleted ? 'admin-card-muted' : ''}"${sortable ? ` data-sort-id="${p.id}"` : ''}>
+    <article class="admin-card admin-card-compact ${p.deleted ? 'admin-card-muted' : ''}${p.in_stock === false && !p.deleted ? ' admin-card-oos' : ''}"${sortable ? ` data-sort-id="${p.id}"` : ''}>
       <div class="admin-card-row">
         ${sortable ? sortControlsHtml(p.id) : ''}
         <div class="admin-card-main">

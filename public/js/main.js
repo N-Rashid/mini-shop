@@ -1,6 +1,8 @@
 let allProducts = [];
 
 let activeCategory = '';
+let activeTag = '';
+let productSort = 'default';
 
 let searchQuery = '';
 
@@ -23,19 +25,10 @@ async function loadCategories() {
     const categories = await api('/api/categories');
 
     container.innerHTML = `
-
       <button class="category-chip active" data-filter="">Все</button>
-
-      <button class="category-chip category-chip-highlight" data-filter="new">Новинки</button>
-
-      <button class="category-chip category-chip-highlight" data-filter="sale">Акции</button>
-
       ${categories.map(c => `
-
         <button class="category-chip" data-filter="cat-${c.id}">${escapeHtml(c.name)}</button>
-
       `).join('')}
-
     `;
 
 
@@ -66,26 +59,128 @@ async function loadCategories() {
 
 
 
-function getFilteredProducts() {
+function getCatalogFilterLabel() {
+  const tagLabels = {
+    '': 'Все товары',
+    hit: 'Хит продаж',
+    new: 'Новинки',
+    sale: 'Акции',
+  };
+  const sortLabels = {
+    default: 'как в каталоге',
+    date_desc: 'сначала новые',
+    date_asc: 'сначала старые',
+  };
+  const tag = tagLabels[activeTag] || tagLabels[''];
+  const sort = sortLabels[productSort] || sortLabels.default;
+  if (!activeTag && productSort === 'default') return 'Фильтр';
+  if (!activeTag) return `Сортировка: ${sort}`;
+  if (productSort === 'default') return tag;
+  return `${tag} · ${sort}`;
+}
 
+function updateCatalogFilterLabel() {
+  const label = document.getElementById('catalog-filter-label');
+  if (label) label.textContent = getCatalogFilterLabel();
+}
+
+function setCatalogFilterMenuOpen(open) {
+  const dropdown = document.getElementById('catalog-filter-dropdown');
+  const toggle = document.getElementById('catalog-filter-toggle');
+  const menu = document.getElementById('catalog-filter-menu');
+  if (!dropdown || !toggle || !menu) return;
+
+  dropdown.classList.toggle('open', open);
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  menu.hidden = !open;
+}
+
+function setupCatalogFilterDropdown() {
+  const dropdown = document.getElementById('catalog-filter-dropdown');
+  const toggle = document.getElementById('catalog-filter-toggle');
+  const menu = document.getElementById('catalog-filter-menu');
+  if (!dropdown || !toggle || !menu) return;
+
+  toggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setCatalogFilterMenuOpen(!dropdown.classList.contains('open'));
+  });
+
+  menu.querySelectorAll('[data-tag]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeTag = btn.dataset.tag;
+      menu.querySelectorAll('[data-tag]').forEach(b => b.classList.toggle('active', b === btn));
+      updateCatalogFilterLabel();
+      renderProducts();
+      setCatalogFilterMenuOpen(false);
+    });
+  });
+
+  menu.querySelectorAll('[data-sort]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      productSort = btn.dataset.sort;
+      menu.querySelectorAll('[data-sort]').forEach(b => b.classList.toggle('active', b === btn));
+      updateCatalogFilterLabel();
+      renderProducts();
+      setCatalogFilterMenuOpen(false);
+    });
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!dropdown.contains(e.target)) setCatalogFilterMenuOpen(false);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') setCatalogFilterMenuOpen(false);
+  });
+
+  updateCatalogFilterLabel();
+}
+
+function productCreatedTime(product) {
+  if (!product.created_at) return 0;
+  const raw = product.created_at.includes('T')
+    ? product.created_at
+    : `${product.created_at.replace(' ', 'T')}Z`;
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function sortProducts(list) {
+  const sorted = [...list];
+
+  sorted.sort((a, b) => {
+    const aOut = a.in_stock === false ? 1 : 0;
+    const bOut = b.in_stock === false ? 1 : 0;
+    if (aOut !== bOut) return aOut - bOut;
+
+    if (productSort === 'date_desc') {
+      return productCreatedTime(b) - productCreatedTime(a) || a.id - b.id;
+    }
+    if (productSort === 'date_asc') {
+      return productCreatedTime(a) - productCreatedTime(b) || a.id - b.id;
+    }
+
+    return (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id;
+  });
+
+  return sorted;
+}
+
+function getFilteredProducts() {
   let list = allProducts;
 
-
-
-  if (activeCategory === 'new') {
-
-    list = list.filter(p => p.is_new);
-
-  } else if (activeCategory === 'sale') {
-
-    list = list.filter(p => p.is_on_sale);
-
-  } else if (activeCategory.startsWith('cat-')) {
-
+  if (activeCategory.startsWith('cat-')) {
     const catId = activeCategory.replace('cat-', '');
-
     list = list.filter(p => productHasCategory(p, catId));
+  }
 
+  if (activeTag === 'new') {
+    list = list.filter(p => p.is_new);
+  } else if (activeTag === 'sale') {
+    list = list.filter(p => p.is_on_sale);
+  } else if (activeTag === 'hit') {
+    list = list.filter(p => p.is_bestseller);
   }
 
 
@@ -108,8 +203,7 @@ function getFilteredProducts() {
 
 
 
-  return list;
-
+  return sortProducts(list);
 }
 
 
@@ -122,12 +216,18 @@ function renderSaleSticker(p) {
   return p.is_on_sale ? '<span class="product-sale-sticker">Акция</span>' : '';
 }
 
+function renderOutOfStockSticker(p) {
+  return p.in_stock === false ? '<span class="product-oos-sticker">Нет в наличии</span>' : '';
+}
+
 function renderProductCard(p) {
 
+  const outOfStock = p.in_stock === false;
   const imgUrl = p.images?.[0]?.url;
   const imageUrls = (p.images || []).map(img => img.url);
   const hitSticker = renderHitSticker(p);
   const saleSticker = renderSaleSticker(p);
+  const oosSticker = renderOutOfStockSticker(p);
 
   const img = imgUrl
 
@@ -136,9 +236,10 @@ function renderProductCard(p) {
          ${imageUrls.length > 1 ? `<span class="product-photo-count">${imageUrls.length} фото</span>` : ''}
          ${hitSticker}
          ${saleSticker}
+         ${oosSticker}
        </div>`
 
-    : `<div class="product-image-placeholder">${hitSticker}${saleSticker}🍦</div>`;
+    : `<div class="product-image-placeholder">${hitSticker}${saleSticker}${oosSticker}🍦</div>`;
 
 
 
@@ -160,7 +261,7 @@ function renderProductCard(p) {
 
   return `
 
-    <article class="product-card" data-id="${p.id}">
+    <article class="product-card${outOfStock ? ' product-card-out-of-stock' : ''}" data-id="${p.id}">
 
       ${img}
 
@@ -176,6 +277,8 @@ function renderProductCard(p) {
           ${p.is_new ? '<span class="badge badge-new">Новинка</span>' : ''}
 
           ${p.is_on_sale ? '<span class="badge badge-sale">Акция</span>' : ''}
+
+          ${outOfStock ? '<span class="badge badge-oos">Нет в наличии</span>' : ''}
 
         </div>
 
@@ -205,7 +308,9 @@ function renderProductCard(p) {
 
           <div class="product-actions">
 
-            <button class="btn btn-primary btn-sm" data-add="${p.id}">В корзину</button>
+            <button class="btn btn-primary btn-sm" data-add="${p.id}" ${outOfStock ? 'disabled' : ''}>
+              ${outOfStock ? 'Нет в наличии' : 'В корзину'}
+            </button>
 
             ${adminBtns}
 
@@ -235,7 +340,7 @@ function renderProducts() {
 
       <div class="empty-state" style="grid-column:1/-1">
 
-        <h2>${searchQuery || activeCategory ? 'Ничего не найдено' : 'Товаров пока нет'}</h2>
+        <h2>${searchQuery || activeCategory || activeTag ? 'Ничего не найдено' : 'Товаров пока нет'}</h2>
 
         <p>${searchQuery ? 'Попробуйте другой запрос' : 'Скоро появится вкусное мороженое!'}</p>
 
@@ -281,6 +386,19 @@ function renderProducts() {
 
 
   container.querySelectorAll('.product-card').forEach(card => {
+
+    card.querySelector('[data-edit]')?.addEventListener('click', () => {
+
+      openProductEditModal(parseInt(card.dataset.id), allProducts, async () => {
+
+        await loadProducts();
+
+      });
+
+    });
+
+    const addBtn = card.querySelector('[data-add]');
+    if (addBtn?.disabled) return;
 
     const unitBtns = card.querySelectorAll('.unit-btn:not([disabled])');
 
@@ -331,16 +449,6 @@ function renderProducts() {
     });
 
 
-
-    card.querySelector('[data-edit]')?.addEventListener('click', () => {
-
-      openProductEditModal(parseInt(card.dataset.id), allProducts, async () => {
-
-        await loadProducts();
-
-      });
-
-    });
 
   });
 
@@ -409,7 +517,7 @@ function setupSearch() {
   }
 
   loadCategories();
-
+  setupCatalogFilterDropdown();
   loadProducts();
 
   setupSearch();
