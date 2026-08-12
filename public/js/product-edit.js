@@ -209,10 +209,8 @@ async function openProductEditModal(productId, products, onSaved) {
           headers: { 'ngrok-skip-browser-warning': 'true' },
           body: imgData,
         });
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || 'Ошибка загрузки фото');
-        }
+        const { data } = await readJsonResponse(res);
+        if (!res.ok) throw new Error(data?.error || 'Ошибка загрузки фото');
       }
 
       close();

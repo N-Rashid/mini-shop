@@ -78,13 +78,29 @@ async function api(url, options = {}) {
     ...options,
   });
 
-  const data = await res.json().catch(() => null);
+  const { data } = await readJsonResponse(res);
 
   if (!res.ok) {
     throw new Error(data?.error || `Ошибка ${res.status}`);
   }
 
   return data;
+}
+
+async function readJsonResponse(res) {
+  const text = await res.text();
+  if (!text) return { data: null, text: '' };
+
+  try {
+    return { data: JSON.parse(text), text };
+  } catch {
+    if (res.status === 413) {
+      throw new Error('Файл слишком большой. Сожмите фото или загрузите меньше файлов.');
+    }
+    throw new Error(
+      `Ошибка сервера (${res.status}). Часто это лимит загрузки фото — попробуйте без фото или уменьшите размер.`
+    );
+  }
 }
 
 function formatPrice(amount) {

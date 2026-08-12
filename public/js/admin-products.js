@@ -390,8 +390,8 @@ async function loadProductsList() {
         headers: { 'ngrok-skip-browser-warning': 'true' },
         body: formData,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const { data } = await readJsonResponse(res);
+      if (!res.ok) throw new Error(data?.error || `Ошибка ${res.status}`);
 
       showAlert(alertArea, `Товар «${data.name}» добавлен`, 'success');
       form.reset();

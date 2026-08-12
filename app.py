@@ -9,6 +9,7 @@ from flask import (
 )
 import bcrypt
 from werkzeug.security import check_password_hash
+from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -38,6 +39,11 @@ SESSION_DEFAULT_DAYS = 1
 
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def handle_file_too_large(_e):
+    return jsonify({'error': 'Файл слишком большой. Максимум 5 МБ на запрос.'}), 413
 
 
 def now_iso():
