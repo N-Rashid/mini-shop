@@ -381,9 +381,15 @@ async function loadProductsList() {
     e.preventDefault();
     const alertArea = document.getElementById('alert-area');
     const form = e.target;
+    const submitBtn = form.querySelector('button[type="submit"]');
     const formData = new FormData(form);
+    const btnText = submitBtn?.textContent;
 
     try {
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Загрузка...';
+      }
       const res = await fetch('/api/admin/products', {
         method: 'POST',
         credentials: 'same-origin',
@@ -399,6 +405,11 @@ async function loadProductsList() {
       loadProductsList();
     } catch (err) {
       showAlert(alertArea, err.message, 'error');
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = btnText || 'Добавить товар';
+      }
     }
   });
 

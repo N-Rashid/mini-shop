@@ -42,6 +42,9 @@ else:
         HEIC_IMPORT_ERROR = f'pillow-heif: {exc}'
 
 HEIC_SUPPORTED = HEIC_PILLOW or bool(HEIC_CONVERT_CMD)
+PRODUCT_IMAGE_MAX_SIDE = 1600
+PRODUCT_IMAGE_JPEG_QUALITY = 85
+PROCESSABLE_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp'}
 ARCHIVE_ORDERS_AFTER_MONTHS = 5
 PURGE_ARCHIVED_AFTER_MONTHS = 1
 PURGE_DELETED_USERS_AFTER_DAYS = 7
@@ -750,6 +753,34 @@ def is_heic_upload(file):
     return mime in HEIC_MIME_TYPES
 
 
+def prepare_product_image(img):
+    if img.mode not in ('RGB', 'L'):
+        img = img.convert('RGB')
+    elif img.mode == 'L':
+        img = img.convert('RGB')
+
+    width, height = img.size
+    max_side = max(width, height)
+    if max_side > PRODUCT_IMAGE_MAX_SIDE:
+        scale = PRODUCT_IMAGE_MAX_SIDE / max_side
+        new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+        img = img.resize(new_size, Image.Resampling.LANCZOS)
+    return img
+
+
+def save_prepared_jpg(img, product_id):
+    unique_name = f'{product_id}-{uuid.uuid4().hex[:12]}.jpg'
+    path = os.path.join(UPLOADS_DIR, unique_name)
+    prepare_product_image(img).save(path, 'JPEG', quality=PRODUCT_IMAGE_JPEG_QUALITY)
+    return unique_name
+
+
+def load_upload_image(file):
+    with Image.open(file.stream) as img:
+        img.load()
+        return img.copy()
+
+
 def convert_heic_via_cli(file, product_id):
     unique_name = f'{product_id}-{uuid.uuid4().hex[:12]}.jpg'
     out_path = os.path.join(UPLOADS_DIR, unique_name)
@@ -775,6 +806,11 @@ def convert_heic_via_cli(file, product_id):
             raise ValueError(
                 f'Не удалось конвертировать HEIC{f": {details}" if details else ""}'
             )
+        if Image:
+            with Image.open(out_path) as img:
+                img.load()
+                optimized = prepare_product_image(img.copy())
+                optimized.save(out_path, 'JPEG', quality=PRODUCT_IMAGE_JPEG_QUALITY)
         return unique_name
     finally:
         if os.path.exists(in_path):
@@ -783,12 +819,7 @@ def convert_heic_via_cli(file, product_id):
 
 def save_heic_as_jpg(file, product_id):
     if HEIC_PILLOW:
-        img = Image.open(file.stream)
-        if img.mode not in ('RGB', 'L'):
-            img = img.convert('RGB')
-        unique_name = f'{product_id}-{uuid.uuid4().hex[:12]}.jpg'
-        img.save(os.path.join(UPLOADS_DIR, unique_name), 'JPEG', quality=88, optimize=True)
-        return unique_name
+        return save_prepared_jpg(load_upload_image(file), product_id)
 
     if HEIC_CONVERT_CMD:
         return convert_heic_via_cli(file, product_id)
@@ -810,6 +841,9 @@ def save_uploaded_product_image(file, product_id):
         return None
 
     ext = file.filename.rsplit('.', 1)[1].lower()
+    if Image and ext in PROCESSABLE_IMAGE_EXTENSIONS:
+        return save_prepared_jpg(load_upload_image(file), product_id)
+
     unique_name = f'{product_id}-{uuid.uuid4().hex[:12]}.{ext}'
     file.save(os.path.join(UPLOADS_DIR, unique_name))
     return unique_name

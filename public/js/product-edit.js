@@ -177,10 +177,16 @@ async function openProductEditModal(productId, products, onSaved) {
   document.getElementById('edit-product-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const form = e.target;
+    const submitBtn = form.querySelector('button[type="submit"]');
+    const btnText = submitBtn?.textContent;
     const fd = new FormData(form);
     const categoryIds = getSelectedCategoryIds(form);
 
     try {
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Сохранение...';
+      }
       await api(`/api/admin/products/${productId}`, {
         method: 'PUT',
         body: JSON.stringify({
@@ -202,6 +208,7 @@ async function openProductEditModal(productId, products, onSaved) {
 
       const newImages = form.querySelector('[name="new_images"]').files;
       if (newImages.length) {
+        if (submitBtn) submitBtn.textContent = 'Загрузка фото...';
         const imgData = new FormData();
         for (const f of newImages) imgData.append('images', f);
         const res = await fetch(`/api/admin/products/${productId}/images`, {
@@ -218,6 +225,11 @@ async function openProductEditModal(productId, products, onSaved) {
       if (onSaved) onSaved();
     } catch (err) {
       alert(err.message);
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = btnText || 'Сохранить';
+      }
     }
   });
 }
