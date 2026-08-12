@@ -231,9 +231,8 @@ function renderProductCard(p) {
 
   const img = imgUrl
 
-    ? `<div class="product-image-wrap" data-lightbox="${imgUrl}" data-lightbox-set='${JSON.stringify(imageUrls)}' data-alt="${escapeHtml(p.name)}" role="button" tabindex="0" aria-label="Увеличить фото ${escapeHtml(p.name)}">
+    ? `<div class="product-image-wrap" data-lightbox="${imgUrl}" data-lightbox-set='${JSON.stringify(imageUrls)}' data-alt="${escapeHtml(p.name)}" role="button" tabindex="0" aria-label="Фото ${escapeHtml(p.name)}">
          <img class="product-image" src="${imgUrl}" alt="${escapeHtml(p.name)}" loading="lazy" decoding="async">
-         <span class="product-image-zoom-hint" aria-hidden="true">🔍 Увеличить</span>
          ${imageUrls.length > 1 ? `<span class="product-photo-count">${imageUrls.length} фото</span>` : ''}
          ${hitSticker}
          ${saleSticker}
