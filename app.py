@@ -17,7 +17,18 @@ DB_PATH = os.path.join(BASE_DIR, 'db', 'shop.db')
 UPLOADS_DIR = os.path.join(BASE_DIR, 'uploads')
 PUBLIC_DIR = os.path.join(BASE_DIR, 'public')
 
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'heif'}
+HEIC_EXTENSIONS = {'heic', 'heif'}
+HEIC_MIME_TYPES = {'image/heic', 'image/heif', 'image/heic-sequence'}
+
+HEIC_SUPPORTED = False
+try:
+    from PIL import Image
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+    HEIC_SUPPORTED = True
+except ImportError:
+    Image = None
 ARCHIVE_ORDERS_AFTER_MONTHS = 5
 PURGE_ARCHIVED_AFTER_MONTHS = 1
 PURGE_DELETED_USERS_AFTER_DAYS = 7
@@ -30,7 +41,7 @@ DEFAULT_ABOUT = '''Добро пожаловать в «Мороженое Из�
 
 app = Flask(__name__, static_folder=PUBLIC_DIR, static_url_path='')
 app.secret_key = 'mini-shop-secret-change-in-production'
-app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
@@ -43,7 +54,7 @@ os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 @app.errorhandler(RequestEntityTooLarge)
 def handle_file_too_large(_e):
-    return jsonify({'error': 'Файл слишком большой. Максимум 5 МБ на запрос.'}), 413
+    return jsonify({'error': 'Файл слишком большой. Максимум 20 МБ на запрос.'}), 413
 
 
 def now_iso():
@@ -716,6 +727,36 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def is_heic_upload(file):
+    if not file or not file.filename:
+        return False
+    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+    if ext in HEIC_EXTENSIONS:
+        return True
+    mime = (getattr(file, 'content_type', None) or '').lower()
+    return mime in HEIC_MIME_TYPES
+
+
+def save_uploaded_product_image(file, product_id):
+    if is_heic_upload(file):
+        if not HEIC_SUPPORTED:
+            raise ValueError('HEIC не поддерживается на сервере. Установите Pillow и pillow-heif.')
+        img = Image.open(file.stream)
+        if img.mode not in ('RGB', 'L'):
+            img = img.convert('RGB')
+        unique_name = f'{product_id}-{uuid.uuid4().hex[:12]}.jpg'
+        img.save(os.path.join(UPLOADS_DIR, unique_name), 'JPEG', quality=88, optimize=True)
+        return unique_name
+
+    if not allowed_file(file.filename):
+        return None
+
+    ext = file.filename.rsplit('.', 1)[1].lower()
+    unique_name = f'{product_id}-{uuid.uuid4().hex[:12]}.{ext}'
+    file.save(os.path.join(UPLOADS_DIR, unique_name))
+    return unique_name
+
+
 def parse_amount(value, default=0.0):
     if value is None or value == '':
         return default
@@ -745,14 +786,17 @@ def clear_expired_session():
 
 def save_product_images(conn, product_id, files):
     for file in files:
-        if file and file.filename and allowed_file(file.filename):
-            ext = file.filename.rsplit('.', 1)[1].lower()
-            unique_name = f'{product_id}-{uuid.uuid4().hex[:12]}.{ext}'
-            file.save(os.path.join(UPLOADS_DIR, unique_name))
-            conn.execute(
-                'INSERT INTO product_images (product_id, filename) VALUES (?, ?)',
-                (product_id, unique_name)
-            )
+        if not file or not file.filename:
+            continue
+        if not allowed_file(file.filename) and not is_heic_upload(file):
+            continue
+        unique_name = save_uploaded_product_image(file, product_id)
+        if not unique_name:
+            continue
+        conn.execute(
+            'INSERT INTO product_images (product_id, filename) VALUES (?, ?)',
+            (product_id, unique_name)
+        )
 
 
 _db_initialized = False
@@ -1310,7 +1354,12 @@ def admin_create_product():
     ))
     product_id = cur.lastrowid
     set_product_categories(conn, product_id, category_ids)
-    save_product_images(conn, product_id, request.files.getlist('images'))
+    try:
+        save_product_images(conn, product_id, request.files.getlist('images'))
+    except ValueError as exc:
+        conn.rollback()
+        conn.close()
+        return jsonify({'error': str(exc)}), 400
     conn.commit()
 
     row = conn.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
@@ -1406,7 +1455,12 @@ def admin_add_product_images(product_id):
         conn.close()
         return jsonify({'error': 'Товар не найден'}), 404
 
-    save_product_images(conn, product_id, request.files.getlist('images'))
+    try:
+        save_product_images(conn, product_id, request.files.getlist('images'))
+    except ValueError as exc:
+        conn.rollback()
+        conn.close()
+        return jsonify({'error': str(exc)}), 400
     conn.commit()
     conn.close()
     return jsonify({'ok': True})
