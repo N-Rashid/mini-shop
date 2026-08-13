@@ -93,7 +93,7 @@ function renderOrderCard(o, editing, mode) {
     <div class="order-card${o.deleted ? ' order-deleted' : ''}" data-order-id="${o.id}">
       <div class="order-header">
         <div>
-          <strong>Заказ #${o.id}</strong>
+          <strong>Заказ #${o.number ?? o.client_number ?? o.id}</strong>
           <p class="order-date">Оформлен: ${formatDate(o.created_at)}</p>
         </div>
         <div class="order-badges">${statusBadges.join(' ')}</div>

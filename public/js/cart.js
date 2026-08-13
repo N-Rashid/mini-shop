@@ -77,6 +77,7 @@ function renderDesktopSummaryHtml(total, canCheckout, checkoutLabel) {
     <div class="cart-summary-actions">
       <button type="button" class="btn btn-primary cart-checkout-btn"
         ${canCheckout ? '' : 'disabled'}>${checkoutLabel}</button>
+      <a href="/" class="btn btn-outline">Добавить ещё товары</a>
       <button type="button" class="btn btn-outline cart-clear-btn">Очистить корзину</button>
     </div>`;
 }
@@ -92,6 +93,7 @@ function renderMobileBarHtml(total, canCheckout, checkoutLabel) {
     <div class="cart-bar-actions">
       <button type="button" class="btn btn-primary cart-checkout-btn"
         ${canCheckout ? '' : 'disabled'}>${checkoutLabel}</button>
+      <a href="/" class="btn btn-outline">Ещё товары</a>
       <button type="button" class="btn btn-outline cart-clear-btn">Очистить</button>
     </div>`;
 }
@@ -176,11 +178,23 @@ function bindCartEvents() {
   });
 }
 
+async function loadPendingOrder() {
+  try {
+    const data = await api('/api/orders/pending');
+    return data && data.id ? data : null;
+  } catch {
+    return null;
+  }
+}
+
 async function onCheckout() {
   const canCheckout = loggedInUser && !loggedInUser.is_admin;
   if (!canCheckout) return;
 
   const alertArea = document.getElementById('alert-area');
+  const checkoutBtns = document.querySelectorAll('.cart-checkout-btn');
+  checkoutBtns.forEach(btn => { btn.disabled = true; });
+
   try {
     const result = await api('/api/orders/checkout', {
       method: 'POST',
@@ -188,13 +202,21 @@ async function onCheckout() {
     });
 
     Cart.clear();
+    invalidateMiniCartProductsCache();
+
     const msg = result.merged
-      ? `Товары добавлены к заказу #${result.orderId}! Новая сумма: ${formatPrice(result.total)}`
-      : `Заказ #${result.orderId} оформлен! Статус: Ожидание`;
-    showAlert(alertArea, msg, 'success');
+      ? `Товары добавлены к вашему заказу. Сумма: ${formatPrice(result.total)}`
+      : 'Заказ оформлен! Статус: Ожидание';
+
+    sessionStorage.setItem('checkoutNotice', JSON.stringify({
+      message: msg,
+      type: 'success',
+    }));
+
     loadUserInfo();
-    setTimeout(() => { location.href = '/account.html'; }, 1500);
+    location.href = '/';
   } catch (err) {
+    checkoutBtns.forEach(btn => { btn.disabled = false; });
     showAlert(alertArea, err.message, 'error');
   }
 }
@@ -207,7 +229,7 @@ async function renderCart() {
   try {
     loggedInUser = await api('/api/auth/me');
     pendingOrder = loggedInUser && !loggedInUser.is_admin
-      ? await api('/api/orders/pending').catch(() => null)
+      ? await loadPendingOrder()
       : null;
   } catch {
     loggedInUser = null;
@@ -257,12 +279,10 @@ async function renderCart() {
   });
   const canCheckout = loggedInUser && !loggedInUser.is_admin && !hasUnavailable;
   document.body.classList.toggle('cart-has-hint', !canCheckout);
-  const checkoutLabel = pendingOrder
-    ? `Добавить к заказу #${pendingOrder.id}`
-    : 'Оформить заказ';
+  const checkoutLabel = pendingOrder ? 'Добавить к заказу' : 'Оформить заказ';
   const pendingAlert = pendingOrder ? `
     <div class="alert alert-success cart-alert">
-      У вас заказ в ожидании #${pendingOrder.id}. Новые товары будут добавлены к нему.
+      У вас есть заказ в ожидании. Новые товары будут добавлены к нему.
     </div>
   ` : '';
   const unavailableAlert = hasUnavailable ? `
@@ -274,20 +294,25 @@ async function renderCart() {
   container.innerHTML = `
     ${pendingAlert}
     ${unavailableAlert}
+    <div class="cart-top-actions">
+      <a href="/" class="btn btn-outline">← Добавить ещё товары</a>
+    </div>
     <div class="cart-layout cart-desktop-only">
-      <table class="cart-table">
-        <thead>
-          <tr>
-            <th>Товар</th>
-            <th>Ед.</th>
-            <th>Цена</th>
-            <th>Кол-во</th>
-            <th>Сумма</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>${tableRows.join('')}</tbody>
-      </table>
+      <div class="cart-table-wrap">
+        <table class="cart-table">
+          <thead>
+            <tr>
+              <th>Товар</th>
+              <th>Ед.</th>
+              <th>Цена</th>
+              <th>Кол-во</th>
+              <th>Сумма</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>${tableRows.join('')}</tbody>
+        </table>
+      </div>
       <aside class="cart-summary">${renderDesktopSummaryHtml(total, canCheckout, checkoutLabel)}</aside>
     </div>
     <div class="cart-mobile-only">

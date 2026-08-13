@@ -220,6 +220,46 @@ nav a.active {
   margin-left: 4px;
 }
 
+.cart-nav-link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  color: var(--muted);
+  text-decoration: none;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.cart-nav-link:hover,
+.cart-nav-link.active {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.cart-nav-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.cart-nav-link .cart-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  line-height: 1;
+  border: 2px solid var(--surface);
+}
+
 .user-info {
   display: inline-flex;
   align-items: center;
@@ -939,6 +979,7 @@ nav a.active {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  overscroll-behavior: none;
   opacity: 1;
   transition: opacity 0.22s ease;
 }
@@ -986,7 +1027,8 @@ nav a.active {
 }
 
 .lightbox-slide img,
-.lightbox-single {
+.lightbox-single,
+.lightbox-zoom-img {
   display: block;
   max-width: 100%;
   max-height: 90vh;
@@ -994,8 +1036,25 @@ nav a.active {
   height: auto;
   border-radius: var(--radius);
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
-  touch-action: manipulation;
-  pointer-events: none;
+  touch-action: none;
+  pointer-events: auto;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+.lightbox-zoom-viewport {
+  width: 100%;
+  height: 100%;
+  min-height: 50vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.lightbox-zoom-viewport-single {
+  min-height: auto;
 }
 
 .lightbox-close {
@@ -1046,17 +1105,26 @@ nav a.active {
 
 .cart-layout {
   display: grid;
-  grid-template-columns: 1fr min(380px, 100%);
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 380px);
   gap: 24px;
   align-items: start;
 }
 
+.cart-table-wrap {
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
 .cart-table {
   width: 100%;
+  min-width: 560px;
   table-layout: auto;
   background: var(--surface);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  box-shadow: none;
   border-collapse: collapse;
   overflow: hidden;
 }
@@ -1142,6 +1210,31 @@ nav a.active {
 
 .cart-page-body {
   display: block;
+}
+
+.cart-top-actions {
+  margin-bottom: 16px;
+}
+
+.cart-top-actions .btn {
+  width: 100%;
+}
+
+@media (min-width: 769px) {
+  .cart-top-actions .btn {
+    width: auto;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .cart-desktop-only.cart-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .cart-summary {
+    position: static;
+    max-width: 420px;
+  }
 }
 
 .cart-items {
@@ -1237,6 +1330,10 @@ nav a.active {
   margin: 0;
 }
 
+.cart-bar-inner .cart-bar-actions .cart-checkout-btn {
+  grid-column: 1 / -1;
+}
+
 .cart-bar-total {
   display: flex;
   justify-content: space-between;
@@ -1250,6 +1347,110 @@ nav a.active {
 .cart-bar-total strong {
   font-size: 1.35rem;
   white-space: nowrap;
+}
+
+/* Floating mini cart bar (catalog and other pages) */
+.mini-cart-bar {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 10px 32px rgba(232, 67, 147, 0.2);
+  text-decoration: none;
+  color: inherit;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.mini-cart-bar[hidden] {
+  display: none !important;
+}
+
+.mini-cart-bar-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.mini-cart-bar-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--bg-soft);
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.mini-cart-bar-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.mini-cart-bar-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mini-cart-bar-count {
+  font-size: 0.82rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.mini-cart-bar-total {
+  font-size: 1.05rem;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.mini-cart-bar-action {
+  flex-shrink: 0;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.88rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.mini-cart-bar:hover {
+  text-decoration: none;
+  color: inherit;
+  box-shadow: 0 12px 36px rgba(232, 67, 147, 0.28);
+}
+
+.mini-cart-bar--pulse {
+  animation: miniCartPulse 0.45s ease;
+}
+
+@keyframes miniCartPulse {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.03); }
+  100% { transform: scale(1); }
+}
+
+body.has-mini-cart-bar:not(.cart-page) {
+  padding-bottom: calc(92px + env(safe-area-inset-bottom));
+}
+
+body.has-mini-cart-bar:not(.cart-page) .site-footer {
+  margin-bottom: 0;
 }
 
 .empty-state {
@@ -2352,6 +2553,7 @@ nav a.active {
   justify-content: center;
   z-index: 900;
   padding: 20px;
+  overscroll-behavior: contain;
 }
 
 .modal {
@@ -2373,6 +2575,16 @@ nav a.active {
   display: flex;
   gap: 10px;
   margin-top: 20px;
+}
+
+html.scroll-locked,
+body.scroll-locked {
+  overflow: hidden;
+}
+
+body.scroll-locked {
+  position: fixed;
+  width: 100%;
 }
 
 @media (max-width: 768px) {
@@ -2667,11 +2879,15 @@ body {
   }
 
   body.cart-page {
-    padding-bottom: calc(150px + env(safe-area-inset-bottom));
+    padding-bottom: calc(190px + env(safe-area-inset-bottom));
   }
 
   body.cart-page.cart-has-hint {
-    padding-bottom: calc(210px + env(safe-area-inset-bottom));
+    padding-bottom: calc(250px + env(safe-area-inset-bottom));
+  }
+
+  .cart-mobile-only .cart-items {
+    padding-bottom: 8px;
   }
 
   body.cart-page .cart-bar:not([hidden]) {

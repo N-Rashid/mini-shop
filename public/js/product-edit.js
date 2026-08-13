@@ -109,8 +109,7 @@ async function openProductEditModal(productId, products, onSaved) {
         </div>
         <div class="form-group">
           <label>Добавить фото (можно несколько)</label>
-          <input name="new_images" type="file" accept="image/*,.heic,.heif" multiple>
-          <p class="form-hint">JPG, PNG, WebP, GIF и HEIC с iPhone (конвертируется в JPG)</p>
+          <input name="new_images" type="file" accept="image/*" multiple>
         </div>
         <div class="modal-actions">
           <button type="submit" class="btn btn-primary">Сохранить</button>
@@ -127,8 +126,12 @@ async function openProductEditModal(productId, products, onSaved) {
     document.body.appendChild(overlay);
   }
 
+  lockPageScroll();
+  bindOverlayScrollGuard(overlay);
+
   const close = () => {
     overlay.remove();
+    unlockPageScroll();
     if (modalHost.id === 'edit-modal') {
       modalHost.style.display = 'none';
       modalHost.innerHTML = '';

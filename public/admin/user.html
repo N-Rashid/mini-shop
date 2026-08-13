@@ -72,7 +72,7 @@
         <article class="order-card ${o.deleted ? 'order-deleted' : ''}">
           <div class="order-header">
             <div>
-              <strong>Заказ #${o.id}</strong>
+              <strong>Заказ #${o.number ?? o.client_number ?? o.id}</strong>
               <p class="order-date">${formatDate(o.created_at)}</p>
             </div>
             <div class="order-badges">${badges.join(' ')}</div>
@@ -139,11 +139,13 @@
       document.getElementById('edit-user-address').value = currentUser.address || '';
       document.getElementById('edit-user-password').value = '';
       document.getElementById('edit-user-modal').style.display = 'flex';
+      lockPageScroll();
     }
 
     function closeEditModal() {
       document.getElementById('edit-user-modal').style.display = 'none';
       document.getElementById('edit-user-form').reset();
+      unlockPageScroll();
     }
 
     async function loadUserProfile() {

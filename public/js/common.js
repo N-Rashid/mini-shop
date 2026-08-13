@@ -18,6 +18,7 @@ const Cart = {
   save(items) {
     localStorage.setItem(CART_KEY, JSON.stringify(items));
     Cart.updateBadge();
+    updateMiniCartBar();
   },
 
   add(productId, quantity = 1, unitType = 'pack') {
@@ -51,6 +52,7 @@ const Cart = {
   clear() {
     localStorage.removeItem(CART_KEY);
     Cart.updateBadge();
+    updateMiniCartBar();
   },
 
   count() {
@@ -62,7 +64,7 @@ const Cart = {
     if (badge) {
       const count = Cart.count();
       badge.textContent = count;
-      badge.style.display = count > 0 ? 'inline' : 'none';
+      badge.style.display = count > 0 ? 'inline-flex' : 'none';
     }
   },
 };
@@ -160,6 +162,17 @@ function initSiteHeader() {
   const active = header.dataset.nav || '';
   const navLink = (href, label, key) =>
     `<a href="${href}"${active === key ? ' class="active"' : ''}>${label}</a>`;
+  const cartLink = (key) => {
+    const activeClass = active === key ? ' active' : '';
+    return `<a href="/cart.html" class="cart-nav-link${activeClass}" aria-label="Корзина">
+      <svg class="cart-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="9" cy="21" r="1"></circle>
+        <circle cx="20" cy="21" r="1"></circle>
+        <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+      </svg>
+      <span id="cart-badge" class="cart-badge" style="display:none">0</span>
+    </a>`;
+  };
 
   header.innerHTML = `
     <div class="container header-inner">
@@ -177,7 +190,7 @@ function initSiteHeader() {
         </div>
         <nav class="header-nav">
           ${navLink('/', 'Каталог', 'catalog')}
-          ${navLink('/cart.html', 'Корзина <span id="cart-badge" class="cart-badge" style="display:none">0</span>', 'cart')}
+          ${cartLink('cart')}
           ${navLink('/about.html', 'О нас', 'about')}
           <span id="user-info" class="user-info"></span>
         </nav>
@@ -318,6 +331,147 @@ function getItemPrice(product, unitType) {
   return product.price_pack || product.cost || 0;
 }
 
+let miniCartProductsCache = null;
+let miniCartProductsPromise = null;
+let miniCartUpdateTimer = null;
+let miniCartLastCount = 0;
+
+function setMiniCartProductsCache(products) {
+  if (!Array.isArray(products)) return;
+  miniCartProductsCache = Object.fromEntries(products.map(p => [p.id, p]));
+  miniCartProductsPromise = Promise.resolve(miniCartProductsCache);
+  updateMiniCartBar();
+}
+
+function invalidateMiniCartProductsCache() {
+  miniCartProductsCache = null;
+  miniCartProductsPromise = null;
+}
+
+async function getMiniCartProducts() {
+  const items = Cart.get();
+  if (miniCartProductsCache) {
+    const missingProduct = items.some(item => !miniCartProductsCache[item.productId]);
+    if (!missingProduct) return miniCartProductsCache;
+    invalidateMiniCartProductsCache();
+  }
+
+  if (!miniCartProductsPromise) {
+    miniCartProductsPromise = api('/api/products')
+      .then(products => {
+        miniCartProductsCache = Object.fromEntries(products.map(p => [p.id, p]));
+        return miniCartProductsCache;
+      })
+      .catch(() => ({}));
+  }
+  return miniCartProductsPromise;
+}
+
+function calcCartTotalWithProducts(productsMap) {
+  let total = 0;
+  for (const item of Cart.get()) {
+    const product = productsMap[item.productId];
+    if (!product) continue;
+    total += getItemPrice(product, item.unitType || 'pack') * item.quantity;
+  }
+  return total;
+}
+
+function formatCartCount(count) {
+  const n = Math.abs(count) % 100;
+  const n1 = n % 10;
+  if (n > 10 && n < 20) return `${count} товаров`;
+  if (n1 > 1 && n1 < 5) return `${count} товара`;
+  if (n1 === 1) return `${count} товар`;
+  return `${count} товаров`;
+}
+
+function initMiniCartBar() {
+  if (document.body.classList.contains('cart-page') || document.getElementById('mini-cart-bar')) {
+    return;
+  }
+
+  const bar = document.createElement('a');
+  bar.id = 'mini-cart-bar';
+  bar.className = 'mini-cart-bar';
+  bar.href = '/cart.html';
+  bar.hidden = true;
+  bar.innerHTML = `
+    <div class="mini-cart-bar-main">
+      <span class="mini-cart-bar-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="9" cy="21" r="1"></circle>
+          <circle cx="20" cy="21" r="1"></circle>
+          <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+        </svg>
+      </span>
+      <div class="mini-cart-bar-text">
+        <span class="mini-cart-bar-count">0 товаров</span>
+        <strong class="mini-cart-bar-total">0 ₽</strong>
+      </div>
+    </div>
+    <span class="mini-cart-bar-action">В корзину</span>`;
+  document.body.appendChild(bar);
+}
+
+function updateMiniCartBar() {
+  clearTimeout(miniCartUpdateTimer);
+  miniCartUpdateTimer = setTimeout(refreshMiniCartBar, 30);
+}
+
+async function refreshMiniCartBar() {
+  if (document.body.classList.contains('cart-page')) return;
+
+  initMiniCartBar();
+  const bar = document.getElementById('mini-cart-bar');
+  if (!bar) return;
+
+  const count = Cart.count();
+  if (!count) {
+    bar.hidden = true;
+    bar.classList.remove('mini-cart-bar--pulse');
+    document.body.classList.remove('has-mini-cart-bar');
+    miniCartLastCount = 0;
+    return;
+  }
+
+  bar.querySelector('.mini-cart-bar-count').textContent = formatCartCount(count);
+  bar.hidden = false;
+  document.body.classList.add('has-mini-cart-bar');
+
+  let total = 0;
+  try {
+    const products = await getMiniCartProducts();
+    total = calcCartTotalWithProducts(products);
+  } catch {
+    total = 0;
+  }
+  bar.querySelector('.mini-cart-bar-total').textContent = formatPrice(total);
+
+  if (count > miniCartLastCount) {
+    bar.classList.remove('mini-cart-bar--pulse');
+    void bar.offsetWidth;
+    bar.classList.add('mini-cart-bar--pulse');
+  }
+  miniCartLastCount = count;
+}
+
+function showStoredCheckoutNotice(containerId = 'alert-area') {
+  const raw = sessionStorage.getItem('checkoutNotice');
+  if (!raw) return;
+
+  sessionStorage.removeItem('checkoutNotice');
+  try {
+    const notice = JSON.parse(raw);
+    const container = document.getElementById(containerId);
+    if (container && notice?.message) {
+      showAlert(container, notice.message, notice.type || 'success');
+    }
+  } catch {
+    /* ignore malformed notice */
+  }
+}
+
 function renderPriceRow(regularPrice, salePrice, unit, isMain = false) {
   const rowClass = isMain ? 'price-line price-line-main' : 'price-line';
   if (salePrice != null && salePrice !== '') {
@@ -360,12 +514,84 @@ function formatProductMeta(p) {
   return parts.join(' · ') || '—';
 }
 
+let scrollLockCount = 0;
+let scrollLockY = 0;
+
+function lockPageScroll() {
+  scrollLockCount += 1;
+  if (scrollLockCount !== 1) return;
+
+  scrollLockY = window.scrollY;
+  document.documentElement.classList.add('scroll-locked');
+  document.body.classList.add('scroll-locked');
+  document.body.style.top = `-${scrollLockY}px`;
+}
+
+function unlockPageScroll() {
+  scrollLockCount = Math.max(0, scrollLockCount - 1);
+  if (scrollLockCount !== 0) return;
+
+  document.documentElement.classList.remove('scroll-locked');
+  document.body.classList.remove('scroll-locked');
+  document.body.style.top = '';
+  window.scrollTo(0, scrollLockY);
+}
+
+function bindOverlayScrollGuard(overlay) {
+  if (!overlay || overlay.dataset.scrollGuardBound) return;
+  overlay.dataset.scrollGuardBound = '1';
+
+  overlay.addEventListener('wheel', (e) => {
+    const scrollable = e.target.closest('.modal');
+    if (!scrollable) {
+      e.preventDefault();
+      return;
+    }
+
+    const delta = e.deltaY;
+    const atTop = scrollable.scrollTop <= 0;
+    const atBottom = scrollable.scrollTop + scrollable.clientHeight >= scrollable.scrollHeight - 1;
+    if ((atTop && delta < 0) || (atBottom && delta > 0)) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+}
+
+function initStaticModalScrollLocks() {
+  document.querySelectorAll('.modal-overlay').forEach(bindOverlayScrollGuard);
+}
+
+function getTouchDistance(t1, t2) {
+  return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+}
+
+function initLightboxZoomViewport(viewport) {
+  viewport._zoomState = { scale: 1, tx: 0, ty: 0 };
+  const img = viewport.querySelector('.lightbox-zoom-img');
+  if (!img) return;
+
+  viewport._applyTransform = () => {
+    const { scale, tx, ty } = viewport._zoomState;
+    img.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`;
+    viewport.classList.toggle('is-zoomed', scale > 1.01);
+  };
+
+  viewport._resetZoom = () => {
+    viewport._zoomState = { scale: 1, tx: 0, ty: 0 };
+    viewport._applyTransform();
+  };
+
+  viewport._applyTransform();
+}
+
 function openLightbox(urlOrUrls, alt = '', startIndex = 0) {
   const urls = (Array.isArray(urlOrUrls) ? urlOrUrls : [urlOrUrls]).filter(Boolean);
   if (!urls.length) return;
 
   let index = Math.max(0, Math.min(startIndex, urls.length - 1));
   document.querySelector('.lightbox')?.remove();
+
+  lockPageScroll();
 
   const overlay = document.createElement('div');
   overlay.className = 'lightbox lightbox-opening';
@@ -385,15 +611,21 @@ function openLightbox(urlOrUrls, alt = '', startIndex = 0) {
           <div class="lightbox-track">
             ${urls.map(url => `
               <div class="lightbox-slide">
-                <img src="${url}" alt="${escapeHtml(alt)}" draggable="false">
+                <div class="lightbox-zoom-viewport">
+                  <img class="lightbox-zoom-img" src="${url}" alt="${escapeHtml(alt)}" draggable="false">
+                </div>
               </div>
             `).join('')}
           </div>
         </div>
       ` : `
-        <img class="lightbox-single" src="${urls[0]}" alt="${escapeHtml(alt)}" draggable="false">
+        <div class="lightbox-zoom-viewport lightbox-zoom-viewport-single">
+          <img class="lightbox-zoom-img lightbox-single" src="${urls[0]}" alt="${escapeHtml(alt)}" draggable="false">
+        </div>
       `}
     </div>`;
+
+  overlay.querySelectorAll('.lightbox-zoom-viewport').forEach(initLightboxZoomViewport);
 
   const track = overlay.querySelector('.lightbox-track');
   const stage = overlay.querySelector('.lightbox-stage');
@@ -402,10 +634,36 @@ function openLightbox(urlOrUrls, alt = '', startIndex = 0) {
   let slideWidth = 0;
   let dragging = false;
   let dragAxis = null;
+  let pinchMode = false;
+  let panMode = false;
+  let activeViewport = null;
+  let pinchStartDist = 0;
+  let pinchStartScale = 1;
+  let panStartX = 0;
+  let panStartY = 0;
+  let panStartTx = 0;
+  let panStartTy = 0;
   let startX = 0;
   let startY = 0;
   let currentX = 0;
   let currentY = 0;
+  let lastTapTime = 0;
+  let hasMoved = false;
+
+  const getCurrentViewport = () => {
+    if (!isGallery) return overlay.querySelector('.lightbox-zoom-viewport');
+    const slide = overlay.querySelectorAll('.lightbox-slide')[index];
+    return slide?.querySelector('.lightbox-zoom-viewport') || null;
+  };
+
+  const isZoomed = () => {
+    const viewport = getCurrentViewport();
+    return Boolean(viewport && viewport._zoomState.scale > 1.01);
+  };
+
+  const resetAllZoom = () => {
+    overlay.querySelectorAll('.lightbox-zoom-viewport').forEach(viewport => viewport._resetZoom?.());
+  };
 
   const updateSlideWidth = () => {
     if (!stage) return;
@@ -428,6 +686,7 @@ function openLightbox(urlOrUrls, alt = '', startIndex = 0) {
   };
 
   const goTo = (newIndex, animate = true) => {
+    resetAllZoom();
     index = Math.max(0, Math.min(newIndex, urls.length - 1));
     setTrackPosition(0, animate);
     updateCounter();
@@ -449,6 +708,7 @@ function openLightbox(urlOrUrls, alt = '', startIndex = 0) {
     overlay.removeEventListener('touchmove', onTouchMove);
     overlay.removeEventListener('touchend', onTouchEnd);
     overlay.removeEventListener('touchcancel', onTouchEnd);
+    unlockPageScroll();
   };
 
   const setDismissOffset = (dy, animate = false) => {
@@ -491,8 +751,8 @@ function openLightbox(urlOrUrls, alt = '', startIndex = 0) {
 
   const onKey = (e) => {
     if (e.key === 'Escape') close();
-    if (isGallery && e.key === 'ArrowLeft') goPrev();
-    if (isGallery && e.key === 'ArrowRight') goNext();
+    if (isGallery && !isZoomed() && e.key === 'ArrowLeft') goPrev();
+    if (isGallery && !isZoomed() && e.key === 'ArrowRight') goNext();
   };
 
   const onResize = () => {
@@ -501,9 +761,33 @@ function openLightbox(urlOrUrls, alt = '', startIndex = 0) {
   };
 
   const onTouchStart = (e) => {
+    if (e.touches.length === 2) {
+      dragging = false;
+      dragAxis = null;
+      activeViewport = e.target.closest('.lightbox-zoom-viewport') || getCurrentViewport();
+      if (!activeViewport) return;
+      pinchStartDist = getTouchDistance(e.touches[0], e.touches[1]);
+      pinchStartScale = activeViewport._zoomState.scale;
+      pinchMode = true;
+      return;
+    }
+
     if (e.touches.length !== 1) return;
+
+    const viewport = e.target.closest('.lightbox-zoom-viewport') || getCurrentViewport();
+    if (viewport && viewport._zoomState.scale > 1.01) {
+      panMode = true;
+      activeViewport = viewport;
+      panStartX = e.touches[0].clientX;
+      panStartY = e.touches[0].clientY;
+      panStartTx = viewport._zoomState.tx;
+      panStartTy = viewport._zoomState.ty;
+      return;
+    }
+
     dragging = true;
     dragAxis = null;
+    hasMoved = false;
     updateSlideWidth();
     startX = currentX = e.touches[0].clientX;
     startY = currentY = e.touches[0].clientY;
@@ -512,18 +796,42 @@ function openLightbox(urlOrUrls, alt = '', startIndex = 0) {
   };
 
   const onTouchMove = (e) => {
-    if (!dragging) return;
+    if (pinchMode && e.touches.length === 2 && activeViewport) {
+      const dist = getTouchDistance(e.touches[0], e.touches[1]);
+      const scale = Math.min(4, Math.max(1, pinchStartScale * (dist / pinchStartDist)));
+      activeViewport._zoomState.scale = scale;
+      if (scale <= 1.01) {
+        activeViewport._zoomState.tx = 0;
+        activeViewport._zoomState.ty = 0;
+      }
+      activeViewport._applyTransform();
+      e.preventDefault();
+      return;
+    }
+
+    if (panMode && e.touches.length === 1 && activeViewport) {
+      activeViewport._zoomState.tx = panStartTx + (e.touches[0].clientX - panStartX);
+      activeViewport._zoomState.ty = panStartTy + (e.touches[0].clientY - panStartY);
+      activeViewport._applyTransform();
+      e.preventDefault();
+      return;
+    }
+
+    if (!dragging || isZoomed()) return;
+
     currentX = e.touches[0].clientX;
     currentY = e.touches[0].clientY;
     const dx = currentX - startX;
     const dy = currentY - startY;
 
     if (!dragAxis && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+      hasMoved = true;
       dragAxis = Math.abs(dy) > Math.abs(dx) ? 'y' : 'x';
     }
 
     if (dragAxis === 'y') {
       setDismissOffset(dy, false);
+      e.preventDefault();
       return;
     }
 
@@ -540,10 +848,40 @@ function openLightbox(urlOrUrls, alt = '', startIndex = 0) {
       }
 
       setTrackPosition(offsetX, false);
+      e.preventDefault();
     }
   };
 
-  const onTouchEnd = () => {
+  const onTouchEnd = (e) => {
+    if (pinchMode) {
+      pinchMode = false;
+      activeViewport = null;
+      return;
+    }
+
+    if (panMode) {
+      panMode = false;
+      activeViewport = null;
+      return;
+    }
+
+    const now = Date.now();
+    if (!pinchMode && !panMode && !hasMoved && e.changedTouches.length === 1) {
+      const viewport = getCurrentViewport();
+      if (viewport && now - lastTapTime < 300) {
+        if (viewport._zoomState.scale > 1.01) viewport._resetZoom();
+        else {
+          viewport._zoomState.scale = 2.5;
+          viewport._applyTransform();
+        }
+        lastTapTime = 0;
+        dragging = false;
+        dragAxis = null;
+        return;
+      }
+      lastTapTime = now;
+    }
+
     if (!dragging) return;
     dragging = false;
     const dx = currentX - startX;
@@ -581,8 +919,9 @@ function openLightbox(urlOrUrls, alt = '', startIndex = 0) {
     if (e.target === overlay) close();
   });
 
-  overlay.addEventListener('touchstart', onTouchStart, { passive: true });
-  overlay.addEventListener('touchmove', onTouchMove, { passive: true });
+  overlay.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
+  overlay.addEventListener('touchstart', onTouchStart, { passive: false });
+  overlay.addEventListener('touchmove', onTouchMove, { passive: false });
   overlay.addEventListener('touchend', onTouchEnd, { passive: true });
   overlay.addEventListener('touchcancel', onTouchEnd, { passive: true });
 
@@ -644,8 +983,16 @@ async function loadUserInfo() {
 
 function bootSiteChrome() {
   initSiteHeader();
+  initStaticModalScrollLocks();
+  initMiniCartBar();
   Cart.updateBadge();
+  updateMiniCartBar();
   loadUserInfo();
+
+  window.addEventListener('pageshow', () => {
+    Cart.updateBadge();
+    updateMiniCartBar();
+  });
 }
 
 if (document.body) {

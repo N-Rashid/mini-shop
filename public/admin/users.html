@@ -179,11 +179,13 @@
       document.getElementById('edit-user-address').value = user.address || '';
       document.getElementById('edit-user-password').value = '';
       document.getElementById('edit-user-modal').style.display = 'flex';
+      lockPageScroll();
     }
 
     function closeEditModal() {
       document.getElementById('edit-user-modal').style.display = 'none';
       document.getElementById('edit-user-form').reset();
+      unlockPageScroll();
     }
 
     function renderUsersList() {

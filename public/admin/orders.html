@@ -69,7 +69,7 @@
       container.innerHTML = orders.map(o => `
         <div class="order-card ${o.deleted ? 'order-deleted' : ''} ${o.archived ? 'order-archived' : ''}">
           <div class="order-header">
-            <strong>Заказ #${o.id}</strong>
+            <strong>Заказ №${o.number ?? o.client_number ?? o.id} · ${escapeHtml(o.user_name)}</strong>
             <span class="badge ${o.deleted ? 'badge-deleted' : o.archived ? 'badge-archived' : orderStatusClass(o.status)}">
               ${o.deleted ? 'Удалён' : o.archived ? 'В архиве' : escapeHtml(o.status_label || orderStatusLabel(o.status))}
             </span>

@@ -439,6 +439,7 @@ function renderProducts() {
       Cart.add(parseInt(btn.dataset.add), qty, selectedUnit);
 
       btn.textContent = '✓ Добавлено';
+      updateMiniCartBar();
 
       setTimeout(() => { btn.textContent = 'В корзину'; }, 1200);
 
@@ -474,6 +475,7 @@ async function loadProducts() {
 
     allProducts = await api('/api/products');
 
+    setMiniCartProductsCache(allProducts);
     renderProducts();
 
   } catch (err) {
@@ -527,6 +529,7 @@ function setupSearch() {
   loadCategories();
   setupCatalogFilterDropdown();
   loadProducts();
+  showStoredCheckoutNotice();
 
   setupSearch();
 

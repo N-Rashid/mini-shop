@@ -1,8 +1,5 @@
 import os
-import shutil
 import sqlite3
-import subprocess
-import tempfile
 import uuid
 from datetime import datetime, timezone, timedelta
 from functools import wraps
@@ -20,31 +17,16 @@ DB_PATH = os.path.join(BASE_DIR, 'db', 'shop.db')
 UPLOADS_DIR = os.path.join(BASE_DIR, 'uploads')
 PUBLIC_DIR = os.path.join(BASE_DIR, 'public')
 
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'heif'}
-HEIC_EXTENSIONS = {'heic', 'heif'}
-HEIC_MIME_TYPES = {'image/heic', 'image/heif', 'image/heic-sequence'}
-
-HEIC_PILLOW = False
-HEIC_CONVERT_CMD = shutil.which('heif-convert')
-HEIC_IMPORT_ERROR = None
-Image = None
-
-try:
-    from PIL import Image
-except ImportError as exc:
-    HEIC_IMPORT_ERROR = f'Pillow: {exc}'
-else:
-    try:
-        import pillow_heif
-        pillow_heif.register_heif_opener()
-        HEIC_PILLOW = True
-    except ImportError as exc:
-        HEIC_IMPORT_ERROR = f'pillow-heif: {exc}'
-
-HEIC_SUPPORTED = HEIC_PILLOW or bool(HEIC_CONVERT_CMD)
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 PRODUCT_IMAGE_MAX_SIDE = 1600
 PRODUCT_IMAGE_JPEG_QUALITY = 85
 PROCESSABLE_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp'}
+
+Image = None
+try:
+    from PIL import Image
+except ImportError:
+    pass
 ARCHIVE_ORDERS_AFTER_MONTHS = 5
 PURGE_ARCHIVED_AFTER_MONTHS = 1
 PURGE_DELETED_USERS_AFTER_DAYS = 7
@@ -196,6 +178,22 @@ def migrate_db(conn):
 
     order_table_cols = table_columns(conn, 'orders')
     add_column_if_missing(conn, 'orders', 'archived_at', 'TEXT NULL')
+    add_column_if_missing(conn, 'orders', 'client_number', 'INTEGER')
+
+    if not migration_done(conn, 'orders_client_number_backfill'):
+        user_ids = conn.execute('SELECT DISTINCT user_id FROM orders').fetchall()
+        for row in user_ids:
+            orders = conn.execute('''
+                SELECT id FROM orders
+                WHERE user_id = ?
+                ORDER BY created_at ASC, id ASC
+            ''', (row['user_id'],)).fetchall()
+            for idx, order in enumerate(orders, start=1):
+                conn.execute(
+                    'UPDATE orders SET client_number = ? WHERE id = ?',
+                    (idx, order['id']),
+                )
+        mark_migration(conn, 'orders_client_number_backfill')
 
     if not migration_done(conn, 'products_weight_kg_to_g'):
         conn.execute(
@@ -421,6 +419,7 @@ def fetch_order_items(conn, order_id):
 
 def map_user_order(conn, order_row):
     d = row_to_dict(order_row)
+    d['number'] = order_row['client_number'] if order_row['client_number'] is not None else order_row['id']
     d['status_label'] = map_order_status(order_row['status'])
     d['is_archived'] = bool(order_row['archived_at'])
     d['deleted'] = bool(order_row['deleted_at'])
@@ -667,8 +666,45 @@ def get_pending_order(conn, user_id):
         SELECT id, total, status FROM orders
         WHERE user_id = ? AND status = 'pending'
           AND deleted_at IS NULL AND archived_at IS NULL
-        ORDER BY created_at DESC LIMIT 1
+        ORDER BY created_at ASC LIMIT 1
     ''', (user_id,)).fetchone()
+
+
+def consolidate_pending_orders(conn, user_id):
+    rows = conn.execute('''
+        SELECT id FROM orders
+        WHERE user_id = ? AND status = 'pending'
+          AND deleted_at IS NULL AND archived_at IS NULL
+        ORDER BY created_at ASC
+    ''', (user_id,)).fetchall()
+    if len(rows) <= 1:
+        return get_pending_order(conn, user_id)
+
+    primary_id = rows[0]['id']
+    for row in rows[1:]:
+        extra_id = row['id']
+        extra_items = conn.execute('''
+            SELECT product_id, quantity, price, unit_type
+            FROM order_items
+            WHERE order_id = ? AND deleted_at IS NULL
+        ''', (extra_id,)).fetchall()
+        for item in extra_items:
+            append_items_to_order(conn, primary_id, [{
+                'product_id': item['product_id'],
+                'quantity': item['quantity'],
+                'price': item['price'],
+                'unit_type': item['unit_type'],
+            }])
+        conn.execute(
+            'UPDATE orders SET deleted_at = ? WHERE id = ?',
+            (now_iso(), extra_id)
+        )
+
+    total = recalculate_order_total(conn, primary_id)
+    return conn.execute(
+        'SELECT id, total, status FROM orders WHERE id = ?',
+        (primary_id,)
+    ).fetchone()
 
 
 def get_user_order(conn, order_id, user_id):
@@ -687,6 +723,14 @@ def recalculate_order_total(conn, order_id):
     total = float(row['total'])
     conn.execute('UPDATE orders SET total = ? WHERE id = ?', (total, order_id))
     return total
+
+
+def next_client_order_number(conn, user_id):
+    row = conn.execute(
+        'SELECT COALESCE(MAX(client_number), 0) + 1 AS n FROM orders WHERE user_id = ?',
+        (user_id,),
+    ).fetchone()
+    return int(row['n'])
 
 
 def append_items_to_order(conn, order_id, order_items):
@@ -743,16 +787,6 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def is_heic_upload(file):
-    if not file or not file.filename:
-        return False
-    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
-    if ext in HEIC_EXTENSIONS:
-        return True
-    mime = (getattr(file, 'content_type', None) or '').lower()
-    return mime in HEIC_MIME_TYPES
-
-
 def prepare_product_image(img):
     if img.mode not in ('RGB', 'L'):
         img = img.convert('RGB')
@@ -775,74 +809,15 @@ def save_prepared_jpg(img, product_id):
     return unique_name
 
 
-def load_upload_image(file):
-    with Image.open(file.stream) as img:
-        img.load()
-        return img.copy()
-
-
-def convert_heic_via_cli(file, product_id):
-    unique_name = f'{product_id}-{uuid.uuid4().hex[:12]}.jpg'
-    out_path = os.path.join(UPLOADS_DIR, unique_name)
-    suffix = '.heic'
-    if file.filename and '.' in file.filename:
-        ext = file.filename.rsplit('.', 1)[1].lower()
-        if ext in HEIC_EXTENSIONS:
-            suffix = f'.{ext}'
-
-    fd, in_path = tempfile.mkstemp(suffix=suffix, dir=UPLOADS_DIR)
-    os.close(fd)
-    try:
-        file.save(in_path)
-        result = subprocess.run(
-            [HEIC_CONVERT_CMD, in_path, out_path],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-        if result.returncode != 0 or not os.path.exists(out_path):
-            details = (result.stderr or result.stdout or '').strip()
-            raise ValueError(
-                f'Не удалось конвертировать HEIC{f": {details}" if details else ""}'
-            )
-        if Image:
-            with Image.open(out_path) as img:
-                img.load()
-                optimized = prepare_product_image(img.copy())
-                optimized.save(out_path, 'JPEG', quality=PRODUCT_IMAGE_JPEG_QUALITY)
-        return unique_name
-    finally:
-        if os.path.exists(in_path):
-            os.remove(in_path)
-
-
-def save_heic_as_jpg(file, product_id):
-    if HEIC_PILLOW:
-        return save_prepared_jpg(load_upload_image(file), product_id)
-
-    if HEIC_CONVERT_CMD:
-        return convert_heic_via_cli(file, product_id)
-
-    hint = (
-        'На сервере: source venv/bin/activate && pip install -r requirements.txt '
-        'или apt install -y libheif-examples'
-    )
-    if HEIC_IMPORT_ERROR:
-        raise ValueError(f'HEIC не поддерживается ({HEIC_IMPORT_ERROR}). {hint}')
-    raise ValueError(f'HEIC не поддерживается. {hint}')
-
-
 def save_uploaded_product_image(file, product_id):
-    if is_heic_upload(file):
-        return save_heic_as_jpg(file, product_id)
-
     if not allowed_file(file.filename):
         return None
 
     ext = file.filename.rsplit('.', 1)[1].lower()
     if Image and ext in PROCESSABLE_IMAGE_EXTENSIONS:
-        return save_prepared_jpg(load_upload_image(file), product_id)
+        with Image.open(file.stream) as img:
+            img.load()
+            return save_prepared_jpg(img.copy(), product_id)
 
     unique_name = f'{product_id}-{uuid.uuid4().hex[:12]}.{ext}'
     file.save(os.path.join(UPLOADS_DIR, unique_name))
@@ -878,9 +853,7 @@ def clear_expired_session():
 
 def save_product_images(conn, product_id, files):
     for file in files:
-        if not file or not file.filename:
-            continue
-        if not allowed_file(file.filename) and not is_heic_upload(file):
+        if not file or not file.filename or not allowed_file(file.filename):
             continue
         unique_name = save_uploaded_product_image(file, product_id)
         if not unique_name:
@@ -1218,30 +1191,36 @@ def checkout():
         conn.close()
         return jsonify({'error': str(e)}), 400
 
-    pending = get_pending_order(conn, user['id'])
-    merged = False
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        pending = consolidate_pending_orders(conn, user['id'])
+        merged = False
 
-    if pending:
-        order_id = pending['id']
-        append_items_to_order(conn, order_id, order_items)
-        new_total = pending['total'] + total
-        conn.execute('UPDATE orders SET total = ? WHERE id = ?', (new_total, order_id))
-        merged = True
-    else:
-        cur = conn.execute(
-            'INSERT INTO orders (user_id, total, status) VALUES (?, ?, ?)',
-            (user['id'], total, 'pending')
-        )
-        order_id = cur.lastrowid
-        for oi in order_items:
-            conn.execute(
-                'INSERT INTO order_items (order_id, product_id, quantity, price, unit_type) VALUES (?, ?, ?, ?, ?)',
-                (order_id, oi['product_id'], oi['quantity'], oi['price'], oi['unit_type'])
+        if pending:
+            order_id = pending['id']
+            append_items_to_order(conn, order_id, order_items)
+            new_total = recalculate_order_total(conn, order_id)
+            merged = True
+        else:
+            client_number = next_client_order_number(conn, user['id'])
+            cur = conn.execute(
+                'INSERT INTO orders (user_id, total, status, client_number) VALUES (?, ?, ?, ?)',
+                (user['id'], total, 'pending', client_number)
             )
-        new_total = total
+            order_id = cur.lastrowid
+            for oi in order_items:
+                conn.execute(
+                    'INSERT INTO order_items (order_id, product_id, quantity, price, unit_type) VALUES (?, ?, ?, ?, ?)',
+                    (order_id, oi['product_id'], oi['quantity'], oi['price'], oi['unit_type'])
+                )
+            new_total = total
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+    except sqlite3.Error:
+        conn.rollback()
+        return jsonify({'error': 'Не удалось оформить заказ'}), 500
+    finally:
+        conn.close()
 
     return jsonify({
         'orderId': order_id,
@@ -1259,7 +1238,7 @@ def user_orders():
     purge_archived_orders(conn)
     conn.commit()
     rows = conn.execute('''
-        SELECT id, total, status, created_at, archived_at, deleted_at FROM orders
+        SELECT id, client_number, total, status, created_at, archived_at, deleted_at FROM orders
         WHERE user_id = ? AND deleted_at IS NULL
         ORDER BY created_at DESC
     ''', (session['user_id'],)).fetchall()
@@ -1446,12 +1425,7 @@ def admin_create_product():
     ))
     product_id = cur.lastrowid
     set_product_categories(conn, product_id, category_ids)
-    try:
-        save_product_images(conn, product_id, request.files.getlist('images'))
-    except ValueError as exc:
-        conn.rollback()
-        conn.close()
-        return jsonify({'error': str(exc)}), 400
+    save_product_images(conn, product_id, request.files.getlist('images'))
     conn.commit()
 
     row = conn.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
@@ -1547,12 +1521,7 @@ def admin_add_product_images(product_id):
         conn.close()
         return jsonify({'error': 'Товар не найден'}), 404
 
-    try:
-        save_product_images(conn, product_id, request.files.getlist('images'))
-    except ValueError as exc:
-        conn.rollback()
-        conn.close()
-        return jsonify({'error': str(exc)}), 400
+    save_product_images(conn, product_id, request.files.getlist('images'))
     conn.commit()
     conn.close()
     return jsonify({'ok': True})
@@ -1764,7 +1733,7 @@ def admin_list_orders():
     purge_archived_orders(conn)
     conn.commit()
     sql = '''
-        SELECT o.id, o.total, o.status, o.created_at, o.deleted_at, o.archived_at,
+        SELECT o.id, o.client_number, o.total, o.status, o.created_at, o.deleted_at, o.archived_at,
                u.name as user_name, u.login as user_login
         FROM orders o
         JOIN users u ON u.id = o.user_id
@@ -1794,6 +1763,7 @@ def admin_list_orders():
             WHERE oi.order_id = ?
         ''', (o['id'],)).fetchall()
         d = row_to_dict(o)
+        d['number'] = o['client_number'] if o['client_number'] is not None else o['id']
         d['deleted'] = bool(o['deleted_at'])
         d['archived'] = bool(o['archived_at'])
         d['status_label'] = map_order_status(o['status'])
@@ -1927,7 +1897,7 @@ def admin_user_orders(user_id):
     archive_old_orders(conn)
     conn.commit()
     rows = conn.execute('''
-        SELECT id, total, status, created_at, archived_at, deleted_at
+        SELECT id, client_number, total, status, created_at, archived_at, deleted_at
         FROM orders
         WHERE user_id = ?
         ORDER BY created_at DESC
