@@ -243,13 +243,9 @@ function renderProductCard(p) {
 
 
 
-  const pieceOption = p.allow_piece_sale
-
+  const pieceBtn = p.allow_piece_sale
     ? `<button type="button" class="unit-btn" data-unit="piece">Штучно</button>`
-
-    : `<button type="button" class="unit-btn" disabled title="Только упаковками">Штучно</button>`;
-
-
+    : '';
 
   const adminBtns = currentUser?.is_admin ? `
 
@@ -292,15 +288,10 @@ function renderProductCard(p) {
         ${p.description ? '<button type="button" class="desc-toggle" data-desc-toggle hidden>Показать полностью</button>' : ''}
 
         <div class="product-footer">
-
           <div class="unit-select">
-
             <button type="button" class="unit-btn active" data-unit="pack">Упаковка</button>
-
-            ${pieceOption}
-
+            ${pieceBtn}
           </div>
-
           <div class="qty-row">
             <span class="qty-row-label">Кол-во:</span>
             ${renderQtyStepper(1)}
