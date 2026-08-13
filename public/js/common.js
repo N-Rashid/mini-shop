@@ -489,14 +489,12 @@ function renderPriceRow(regularPrice, salePrice, unit, isMain = false) {
 
 function renderProductPrices(p) {
   const lines = [];
-  if (p.allow_piece_sale) {
-    lines.push(renderPriceRow(
-      p.price_piece,
-      p.is_on_sale ? p.sale_price_piece : null,
-      'шт.',
-      true
-    ));
-  }
+  lines.push(renderPriceRow(
+    p.price_piece,
+    p.is_on_sale ? p.sale_price_piece : null,
+    'шт.',
+    !!p.allow_piece_sale
+  ));
   lines.push(renderPriceRow(
     p.price_pack,
     p.is_on_sale ? p.sale_price_pack : null,
