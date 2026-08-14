@@ -1,6 +1,9 @@
 let categories = [];
 let editingCategoryId = null;
 let categorySortIds = [];
+let categorySortDirty = false;
+let categoriesListLoading = false;
+let categoriesSortAbort = null;
 
 function sortControlsHtml(id) {
   return `
@@ -52,14 +55,77 @@ function syncSortViews(root, ids) {
   refreshSortNumbers(root);
 }
 
-function bindSortableList(root, config) {
-  if (!root || root.dataset.sortBound === '1') return;
-  root.dataset.sortBound = '1';
+function readCurrentSortIds(root) {
+  const desktop = root.querySelector('#categories-sortable');
+  const mobile = root.querySelector('#categories-sortable-mobile');
+  const fromDesktop = readSortIdsFromDom(desktop);
+  if (fromDesktop.length) return fromDesktop;
+  return readSortIdsFromDom(mobile);
+}
 
-  const { itemSelector, getIds, setIds, reorderUrl, onReload } = config;
+function setCategorySortDirty(dirty) {
+  categorySortDirty = dirty;
+  const saveBtn = document.getElementById('save-category-order');
+  const cancelBtn = document.getElementById('cancel-category-order');
+  if (saveBtn) saveBtn.disabled = !dirty;
+  if (cancelBtn) cancelBtn.disabled = !dirty;
+}
+
+async function saveCategorySortOrder() {
+  const container = document.getElementById('categories-list');
+  const order = readCurrentSortIds(container);
+  if (!order.length) return;
+
+  const saveBtn = document.getElementById('save-category-order');
+  if (saveBtn) saveBtn.disabled = true;
+
+  try {
+    await persistSortOrder('/api/admin/categories/reorder', order);
+    categorySortIds = order;
+    setCategorySortDirty(false);
+    await loadCategories();
+    const alertArea = document.getElementById('alert-area');
+    if (alertArea) showAlert(alertArea, 'Порядок категорий сохранён', 'success');
+  } catch (err) {
+    alert(err.message);
+    setCategorySortDirty(true);
+  }
+}
+
+function cancelCategorySortOrder() {
+  setCategorySortDirty(false);
+  loadCategories();
+}
+
+function bindSortableList(root, config) {
+  if (!root) return;
+
+  categoriesSortAbort?.abort();
+  categoriesSortAbort = new AbortController();
+  const { signal } = categoriesSortAbort;
+
+  const {
+    itemSelector,
+    getIds,
+    setIds,
+    reorderUrl,
+    onReload,
+    autoPersist = true,
+    onOrderChange,
+  } = config;
+
   let draggedRow = null;
 
+  const finishLocalReorder = (nextOrder) => {
+    setIds(nextOrder);
+    syncSortViews(root, nextOrder);
+    refreshSortNumbers(root);
+    onOrderChange?.(nextOrder);
+  };
+
   root.addEventListener('click', async (e) => {
+    if (categoriesListLoading) return;
+
     const upBtn = e.target.closest('[data-sort-up]');
     const downBtn = e.target.closest('[data-sort-down]');
     const btn = upBtn || downBtn;
@@ -68,21 +134,28 @@ function bindSortableList(root, config) {
     e.preventDefault();
     const id = parseInt(upBtn ? upBtn.dataset.sortUp : downBtn.dataset.sortDown, 10);
     const delta = upBtn ? -1 : 1;
-    const nextOrder = swapSortIds(getIds(), id, delta);
+    const currentOrder = readCurrentSortIds(root);
+    const nextOrder = swapSortIds(currentOrder.length ? currentOrder : getIds(), id, delta);
     if (!nextOrder) return;
 
-    root.querySelectorAll('.admin-sort-btn').forEach(b => { b.disabled = true; });
-    try {
-      await persistSortOrder(reorderUrl, nextOrder);
-      setIds(nextOrder);
-      await onReload();
-    } catch (err) {
-      alert(err.message);
-      await onReload();
+    if (autoPersist) {
+      root.querySelectorAll('.admin-sort-btn').forEach(b => { b.disabled = true; });
+      try {
+        await persistSortOrder(reorderUrl, nextOrder);
+        setIds(nextOrder);
+        await onReload();
+      } catch (err) {
+        alert(err.message);
+        await onReload();
+      }
+      return;
     }
-  });
+
+    finishLocalReorder(nextOrder);
+  }, { signal });
 
   root.addEventListener('dragstart', (e) => {
+    if (categoriesListLoading) return;
     const handle = e.target.closest('[data-sort-handle]');
     if (!handle || !root.contains(handle)) return;
     draggedRow = handle.closest(itemSelector);
@@ -90,13 +163,13 @@ function bindSortableList(root, config) {
     draggedRow.classList.add('sortable-dragging');
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', draggedRow.dataset.sortId || '');
-  });
+  }, { signal });
 
   root.addEventListener('dragend', () => {
     draggedRow?.classList.remove('sortable-dragging');
     root.querySelectorAll(itemSelector).forEach(el => el.classList.remove('sortable-over'));
     draggedRow = null;
-  });
+  }, { signal });
 
   root.addEventListener('dragover', (e) => {
     if (!draggedRow) return;
@@ -110,14 +183,15 @@ function bindSortableList(root, config) {
     if (after) parent.insertBefore(draggedRow, item.nextSibling);
     else parent.insertBefore(draggedRow, item);
     refreshSortNumbers(root);
-  });
+  }, { signal });
 
   root.addEventListener('dragleave', (e) => {
     const item = e.target.closest?.(itemSelector);
     if (item) item.classList.remove('sortable-over');
-  });
+  }, { signal });
 
   root.addEventListener('drop', async (e) => {
+    if (categoriesListLoading) return;
     const item = e.target.closest(itemSelector);
     if (!item || !root.contains(item) || !draggedRow) return;
     e.preventDefault();
@@ -129,17 +203,23 @@ function bindSortableList(root, config) {
 
     syncSortViews(root, nextOrder);
 
-    try {
-      await persistSortOrder(reorderUrl, nextOrder);
-      setIds(nextOrder);
-      await onReload();
-    } catch (err) {
-      alert(err.message);
-      await onReload();
-    } finally {
-      draggedRow = null;
+    if (autoPersist) {
+      try {
+        await persistSortOrder(reorderUrl, nextOrder);
+        setIds(nextOrder);
+        await onReload();
+      } catch (err) {
+        alert(err.message);
+        await onReload();
+      } finally {
+        draggedRow = null;
+      }
+      return;
     }
-  });
+
+    finishLocalReorder(nextOrder);
+    draggedRow = null;
+  }, { signal });
 }
 
 async function saveCategory(catId, name) {
@@ -219,9 +299,11 @@ function renderCategoryCard(c, editing, sortable, num) {
 }
 
 async function loadCategories() {
+  categoriesListLoading = true;
+  try {
   categories = await api('/api/admin/categories');
   categorySortIds = categories.map(c => c.id);
-  const canSortCategories = !editingCategoryId;
+  const canSortCategories = !editingCategoryId && categories.length > 1;
 
   const list = document.getElementById('categories-list');
   if (!list) return;
@@ -232,7 +314,14 @@ async function loadCategories() {
   }
 
   list.innerHTML = `
-    ${canSortCategories && categories.length > 1 ? '<p class="admin-section-hint">Порядок категорий на сайте: перетащите ⋮⋮ или нажмите ↑↓</p>' : ''}
+    ${canSortCategories ? `
+      <div class="admin-sort-toolbar">
+        <p class="admin-section-hint">Порядок на сайте: перетащите ⋮⋮ или нажмите ↑↓, затем «Сохранить порядок»</p>
+        <div class="admin-sort-toolbar-actions">
+          <button type="button" class="btn btn-primary btn-sm" id="save-category-order" disabled>Сохранить порядок</button>
+          <button type="button" class="btn btn-outline btn-sm" id="cancel-category-order" disabled>Отменить</button>
+        </div>
+      </div>` : ''}
     <div class="admin-desktop-only">
       <table class="data-table data-table-compact">
         <thead><tr><th></th><th>№</th><th>Название</th><th>Статус</th><th></th></tr></thead>
@@ -280,14 +369,25 @@ async function loadCategories() {
 
   bindCategoryActions(list);
 
-  if (canSortCategories && categories.length > 1) {
+  if (canSortCategories) {
+    setCategorySortDirty(false);
+    document.getElementById('save-category-order')?.addEventListener('click', saveCategorySortOrder);
+    document.getElementById('cancel-category-order')?.addEventListener('click', cancelCategorySortOrder);
+
     bindSortableList(list, {
       itemSelector: '[data-sort-id]',
       getIds: () => categorySortIds,
       setIds: (ids) => { categorySortIds = ids; },
       reorderUrl: '/api/admin/categories/reorder',
       onReload: loadCategories,
+      autoPersist: false,
+      onOrderChange: () => setCategorySortDirty(true),
     });
+  } else {
+    categorySortDirty = false;
+  }
+  } finally {
+    categoriesListLoading = false;
   }
 }
 
