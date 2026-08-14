@@ -12,6 +12,20 @@ let currentUser = null;
 
 
 
+async function loadHomeContent() {
+  const titleEl = document.getElementById('hero-title');
+  const subtitleEl = document.getElementById('hero-subtitle');
+  if (!titleEl && !subtitleEl) return;
+
+  try {
+    const data = await api('/api/site/home');
+    if (titleEl && data.title) titleEl.textContent = data.title;
+    if (subtitleEl && data.subtitle) subtitleEl.textContent = data.subtitle;
+  } catch {
+    /* оставляем текст из HTML */
+  }
+}
+
 async function loadCategories() {
 
   const container = document.getElementById('category-filters');
@@ -556,6 +570,7 @@ function setupSearch() {
 
   }
 
+  loadHomeContent();
   loadCategories();
   setupCatalogFilterDropdown();
   loadProducts();

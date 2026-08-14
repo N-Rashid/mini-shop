@@ -37,6 +37,11 @@ DEFAULT_ABOUT = '''Добро пожаловать в «Мороженое Из�
 
 Приходите или заказывайте — поможем с выбором и доставим свежим.'''
 
+DEFAULT_HOME_TITLE = 'Мороженое Избербаш'
+DEFAULT_HOME_SUBTITLE = (
+    'Большой Ассортимент. Низкие Цены. Доставка. Мороженое для Кафе и Ресторанов'
+)
+
 app = Flask(__name__, static_folder=PUBLIC_DIR, static_url_path='')
 app.secret_key = 'mini-shop-secret-change-in-production'
 app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024
@@ -307,6 +312,20 @@ def migrate_db(conn):
         conn.execute(
             "INSERT INTO site_settings (key, value) VALUES ('about_content', ?)",
             (DEFAULT_ABOUT,),
+        )
+    if not conn.execute(
+        "SELECT 1 FROM site_settings WHERE key = 'home_title'"
+    ).fetchone():
+        conn.execute(
+            "INSERT INTO site_settings (key, value) VALUES ('home_title', ?)",
+            (DEFAULT_HOME_TITLE,),
+        )
+    if not conn.execute(
+        "SELECT 1 FROM site_settings WHERE key = 'home_subtitle'"
+    ).fetchone():
+        conn.execute(
+            "INSERT INTO site_settings (key, value) VALUES ('home_subtitle', ?)",
+            (DEFAULT_HOME_SUBTITLE,),
         )
 
 
@@ -1852,6 +1871,48 @@ def admin_restore_order(order_id):
 
 
 # --- Site content ---
+
+def get_home_content(conn):
+    return {
+        'title': get_setting(conn, 'home_title', DEFAULT_HOME_TITLE),
+        'subtitle': get_setting(conn, 'home_subtitle', DEFAULT_HOME_SUBTITLE),
+    }
+
+
+@app.get('/api/site/home')
+def site_home():
+    conn = get_db()
+    content = get_home_content(conn)
+    conn.close()
+    return jsonify(content)
+
+
+@app.get('/api/admin/site/home')
+@require_admin
+def admin_get_home():
+    conn = get_db()
+    content = get_home_content(conn)
+    conn.close()
+    return jsonify(content)
+
+
+@app.put('/api/admin/site/home')
+@require_admin
+def admin_update_home():
+    data = request.get_json(silent=True) or {}
+    title = (data.get('title') or '').strip()
+    subtitle = (data.get('subtitle') or '').strip()
+    if not title:
+        return jsonify({'error': 'Заголовок не может быть пустым'}), 400
+    if not subtitle:
+        return jsonify({'error': 'Подзаголовок не может быть пустым'}), 400
+    conn = get_db()
+    set_setting(conn, 'home_title', title)
+    set_setting(conn, 'home_subtitle', subtitle)
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
 
 @app.get('/api/site/about')
 def site_about():

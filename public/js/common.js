@@ -1,8 +1,10 @@
 const CART_KEY = 'izberbash-cart';
 const SITE_PHONE = '+79034779706';
 const SITE_PHONE_DISPLAY = '+7 (903) 477-97-06';
+const SITE_EMAIL = 'morozhenoe-izberbash@yandex.ru';
 const SITE_NAME = 'Мороженое Избербаш';
 const SHOP_ADDRESS = 'Советская 11/1, Избербаш';
+const SHOP_HOURS = 'График работы: 8:00–18:00, без выходных';
 const SHOP_WHATSAPP = '79034779706';
 const SHOP_WHATSAPP_URL = `https://wa.me/${SHOP_WHATSAPP}`;
 
@@ -196,6 +198,34 @@ function initSiteHeader() {
         </nav>
       </div>
     </div>`;
+}
+
+function renderSiteFooterHtml(showBrand = false) {
+  const year = new Date().getFullYear();
+  return `
+    ${showBrand ? `<p class="site-footer-brand"><strong>${escapeHtml(SITE_NAME)}</strong></p>` : ''}
+    <p class="site-footer-row">
+      <a href="tel:${SITE_PHONE}">${SITE_PHONE_DISPLAY}</a>
+      <span class="site-footer-sep" aria-hidden="true">·</span>
+      <a href="mailto:${SITE_EMAIL}">${SITE_EMAIL}</a>
+      <span class="site-footer-sep" aria-hidden="true">·</span>
+      <a class="site-footer-wa-link" href="${SHOP_WHATSAPP_URL}" target="_blank" rel="noopener">WhatsApp</a>
+    </p>
+    <p class="site-footer-row">${escapeHtml(SHOP_ADDRESS)}<span class="site-footer-sep" aria-hidden="true">·</span>${escapeHtml(SHOP_HOURS)}</p>
+    <nav class="site-footer-nav" aria-label="Навигация в подвале">
+      <a href="/">Каталог</a>
+      <a href="/cart.html">Корзина</a>
+      <a href="/about.html">О нас</a>
+      <a href="/account.html">Личный кабинет</a>
+    </nav>
+    <p class="site-footer-copy">© ${year} ${escapeHtml(SITE_NAME)}</p>`;
+}
+
+function initSiteFooter() {
+  document.querySelectorAll('footer[data-site-footer]').forEach(footer => {
+    const showBrand = footer.dataset.showBrand === 'true';
+    footer.innerHTML = renderSiteFooterHtml(showBrand);
+  });
 }
 
 function showAlert(container, message, type = 'error') {
@@ -634,6 +664,7 @@ function openLightbox(urlOrUrls, alt = '', startIndex = 0) {
   let dragAxis = null;
   let pinchMode = false;
   let panMode = false;
+  let zoomPanPending = false;
   let activeViewport = null;
   let pinchStartDist = 0;
   let pinchStartScale = 1;
@@ -758,10 +789,20 @@ function openLightbox(urlOrUrls, alt = '', startIndex = 0) {
     setTrackPosition(0, false);
   };
 
+  const handleZoomDoubleTap = (viewport) => {
+    if (!viewport) return;
+    if (viewport._zoomState.scale > 1.01) viewport._resetZoom();
+    else {
+      viewport._zoomState.scale = 2.5;
+      viewport._applyTransform();
+    }
+  };
+
   const onTouchStart = (e) => {
     if (e.touches.length === 2) {
       dragging = false;
       dragAxis = null;
+      zoomPanPending = false;
       activeViewport = e.target.closest('.lightbox-zoom-viewport') || getCurrentViewport();
       if (!activeViewport) return;
       pinchStartDist = getTouchDistance(e.touches[0], e.touches[1]);
@@ -774,12 +815,14 @@ function openLightbox(urlOrUrls, alt = '', startIndex = 0) {
 
     const viewport = e.target.closest('.lightbox-zoom-viewport') || getCurrentViewport();
     if (viewport && viewport._zoomState.scale > 1.01) {
-      panMode = true;
+      zoomPanPending = true;
+      panMode = false;
       activeViewport = viewport;
       panStartX = e.touches[0].clientX;
       panStartY = e.touches[0].clientY;
       panStartTx = viewport._zoomState.tx;
       panStartTy = viewport._zoomState.ty;
+      hasMoved = false;
       return;
     }
 
@@ -812,6 +855,21 @@ function openLightbox(urlOrUrls, alt = '', startIndex = 0) {
       activeViewport._zoomState.ty = panStartTy + (e.touches[0].clientY - panStartY);
       activeViewport._applyTransform();
       e.preventDefault();
+      return;
+    }
+
+    if (zoomPanPending && e.touches.length === 1 && activeViewport) {
+      const dx = e.touches[0].clientX - panStartX;
+      const dy = e.touches[0].clientY - panStartY;
+      if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+        hasMoved = true;
+        zoomPanPending = false;
+        panMode = true;
+        activeViewport._zoomState.tx = panStartTx + dx;
+        activeViewport._zoomState.ty = panStartTy + dy;
+        activeViewport._applyTransform();
+        e.preventDefault();
+      }
       return;
     }
 
@@ -853,7 +911,10 @@ function openLightbox(urlOrUrls, alt = '', startIndex = 0) {
   const onTouchEnd = (e) => {
     if (pinchMode) {
       pinchMode = false;
-      activeViewport = null;
+      if (activeViewport) {
+        if (activeViewport._zoomState.scale <= 1.15) activeViewport._resetZoom();
+        activeViewport = null;
+      }
       return;
     }
 
@@ -863,15 +924,30 @@ function openLightbox(urlOrUrls, alt = '', startIndex = 0) {
       return;
     }
 
+    if (zoomPanPending) {
+      zoomPanPending = false;
+      const viewport = activeViewport || getCurrentViewport();
+      activeViewport = null;
+
+      const now = Date.now();
+      if (!hasMoved && e.changedTouches.length === 1 && viewport) {
+        if (now - lastTapTime < 300) {
+          handleZoomDoubleTap(viewport);
+          lastTapTime = 0;
+          dragging = false;
+          dragAxis = null;
+          return;
+        }
+        lastTapTime = now;
+      }
+      return;
+    }
+
     const now = Date.now();
-    if (!pinchMode && !panMode && !hasMoved && e.changedTouches.length === 1) {
+    if (!hasMoved && e.changedTouches.length === 1) {
       const viewport = getCurrentViewport();
       if (viewport && now - lastTapTime < 300) {
-        if (viewport._zoomState.scale > 1.01) viewport._resetZoom();
-        else {
-          viewport._zoomState.scale = 2.5;
-          viewport._applyTransform();
-        }
+        handleZoomDoubleTap(viewport);
         lastTapTime = 0;
         dragging = false;
         dragAxis = null;
@@ -981,6 +1057,7 @@ async function loadUserInfo() {
 
 function bootSiteChrome() {
   initSiteHeader();
+  initSiteFooter();
   initStaticModalScrollLocks();
   initMiniCartBar();
   Cart.updateBadge();

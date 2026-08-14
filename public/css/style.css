@@ -1485,16 +1485,65 @@ body.has-mini-cart-bar:not(.cart-page) .site-footer {
 /* Footer */
 .site-footer {
   background: linear-gradient(135deg, var(--bg-soft), var(--surface));
-  border-top: 2px solid var(--border);
-  padding: 24px 0;
-  margin-top: 48px;
+  border-top: 1px solid var(--border);
+  padding: 10px 12px max(10px, env(safe-area-inset-bottom));
+  margin-top: 32px;
   text-align: center;
   color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.3;
+}
+
+.site-footer p {
+  margin: 0;
+}
+
+.site-footer-brand {
+  margin-bottom: 4px !important;
+}
+
+.site-footer-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 2px;
+}
+
+.site-footer-sep {
+  opacity: 0.45;
+  user-select: none;
 }
 
 .site-footer a {
-  font-weight: 700;
-  font-size: 1.1rem;
+  font-weight: 600;
+  font-size: inherit;
+}
+
+.site-footer-wa-link {
+  color: #128c7e;
+}
+
+.site-footer-wa-link:hover {
+  text-decoration: underline;
+}
+
+.site-footer-nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px 10px;
+  margin: 6px 0 4px;
+}
+
+.site-footer-nav a {
+  font-weight: 500;
+}
+
+.site-footer-copy {
+  font-size: 0.62rem;
+  opacity: 0.8;
 }
 
 /* Forms */
@@ -3178,8 +3227,8 @@ body {
   }
 
   .site-footer {
-    margin-top: 32px;
-    padding-bottom: max(24px, env(safe-area-inset-bottom));
+    margin-top: 24px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
   }
 }
 

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#e84393">
-  <title>Админ — О нас</title>
+  <title>Админ — Контент сайта</title>
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body class="admin-page">
@@ -19,17 +19,36 @@
     <div class="admin-layout">
       <div id="sidebar"></div>
       <div class="admin-content">
-        <h1>Страница «О нас»</h1>
-        <p style="color:var(--muted);margin-bottom:20px">Текст отображается на странице «О нас» в верхнем меню сайта.</p>
+        <h1>Контент сайта</h1>
         <div id="alert-area"></div>
 
-        <form id="about-form">
-          <div class="form-group">
-            <label>Текст о компании</label>
-            <textarea name="content" id="about-content" rows="14" required></textarea>
-          </div>
-          <button type="submit" class="btn btn-primary">Сохранить</button>
-        </form>
+        <section class="admin-section">
+          <h2 class="admin-section-title">Главная страница</h2>
+          <p style="color:var(--muted);margin-bottom:16px">Заголовок и текст под ним в верхней части каталога.</p>
+          <form id="home-form">
+            <div class="form-group">
+              <label for="home-title">Заголовок</label>
+              <input type="text" name="title" id="home-title" maxlength="120" required>
+            </div>
+            <div class="form-group">
+              <label for="home-subtitle">Текст под заголовком</label>
+              <textarea name="subtitle" id="home-subtitle" rows="4" maxlength="500" required></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">Сохранить главную</button>
+          </form>
+        </section>
+
+        <section class="admin-section">
+          <h2 class="admin-section-title">Страница «О нас»</h2>
+          <p style="color:var(--muted);margin-bottom:16px">Текст на странице «О нас» в верхнем меню сайта.</p>
+          <form id="about-form">
+            <div class="form-group">
+              <label for="about-content">Текст о компании</label>
+              <textarea name="content" id="about-content" rows="14" required></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">Сохранить «О нас»</button>
+          </form>
+        </section>
       </div>
     </div>
   </main>
@@ -49,24 +68,48 @@
         adminLogout();
       });
 
-      const textarea = document.getElementById('about-content');
+      const alertArea = document.getElementById('alert-area');
+      const homeTitle = document.getElementById('home-title');
+      const homeSubtitle = document.getElementById('home-subtitle');
+      const aboutContent = document.getElementById('about-content');
+
       try {
-        const data = await api('/api/admin/site/about');
-        textarea.value = data.content || '';
+        const [home, about] = await Promise.all([
+          api('/api/admin/site/home'),
+          api('/api/admin/site/about'),
+        ]);
+        homeTitle.value = home.title || '';
+        homeSubtitle.value = home.subtitle || '';
+        aboutContent.value = about.content || '';
       } catch (err) {
-        showAlert(document.getElementById('alert-area'), err.message, 'error');
+        showAlert(alertArea, err.message, 'error');
       }
+
+      document.getElementById('home-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+          await api('/api/admin/site/home', {
+            method: 'PUT',
+            body: JSON.stringify({
+              title: homeTitle.value.trim(),
+              subtitle: homeSubtitle.value.trim(),
+            }),
+          });
+          showAlert(alertArea, 'Текст главной страницы сохранён', 'success');
+        } catch (err) {
+          showAlert(alertArea, err.message, 'error');
+        }
+      });
 
       document.getElementById('about-form').addEventListener('submit', async (e) => {
         e.preventDefault();
-        const alertArea = document.getElementById('alert-area');
-        const content = textarea.value.trim();
+        const content = aboutContent.value.trim();
         try {
           await api('/api/admin/site/about', {
             method: 'PUT',
             body: JSON.stringify({ content }),
           });
-          showAlert(alertArea, 'Текст сохранён', 'success');
+          showAlert(alertArea, 'Текст «О нас» сохранён', 'success');
         } catch (err) {
           showAlert(alertArea, err.message, 'error');
         }

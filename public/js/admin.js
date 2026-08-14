@@ -21,7 +21,7 @@ function adminSidebar(active) {
       <a href="/admin/categories.html" ${active === 'categories' ? 'class="active"' : ''}>Категории</a>
       <a href="/admin/users.html" ${active === 'users' ? 'class="active"' : ''}>Клиенты</a>
       <a href="/admin/orders.html" ${active === 'orders' ? 'class="active"' : ''}>Заказы</a>
-      <a href="/admin/content.html" ${active === 'content' ? 'class="active"' : ''}>О нас</a>
+      <a href="/admin/content.html" ${active === 'content' ? 'class="active"' : ''}>Контент</a>
       <hr style="margin:16px 0;border:none;border-top:1px solid var(--border)">
       <a href="#" id="admin-logout">Выйти</a>
       <a href="/">На сайт</a>
