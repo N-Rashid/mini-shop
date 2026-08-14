@@ -3,6 +3,7 @@ let productFilter = 'all';
 let productSearchQuery = '';
 let productCategoryFilter = '';
 let productSortIds = [];
+let productSortDirty = false;
 let productsListLoading = false;
 let productsSortAbort = null;
 
@@ -65,6 +66,40 @@ function readCurrentSortIds(root) {
   return readSortIdsFromDom(mobile);
 }
 
+function setProductSortDirty(dirty) {
+  productSortDirty = dirty;
+  const saveBtn = document.getElementById('save-product-order');
+  const cancelBtn = document.getElementById('cancel-product-order');
+  if (saveBtn) saveBtn.disabled = !dirty;
+  if (cancelBtn) cancelBtn.disabled = !dirty;
+}
+
+async function saveProductSortOrder() {
+  const container = document.getElementById('products-list');
+  const order = readCurrentSortIds(container);
+  if (!order.length) return;
+
+  const saveBtn = document.getElementById('save-product-order');
+  if (saveBtn) saveBtn.disabled = true;
+
+  try {
+    await persistSortOrder('/api/admin/products/reorder', order);
+    productSortIds = order;
+    setProductSortDirty(false);
+    await loadProductsList();
+    const alertArea = document.getElementById('alert-area');
+    if (alertArea) showAlert(alertArea, 'Порядок товаров сохранён', 'success');
+  } catch (err) {
+    alert(err.message);
+    setProductSortDirty(true);
+  }
+}
+
+function cancelProductSortOrder() {
+  setProductSortDirty(false);
+  loadProductsList();
+}
+
 function bindSortableList(root, config) {
   if (!root) return;
 
@@ -72,8 +107,24 @@ function bindSortableList(root, config) {
   productsSortAbort = new AbortController();
   const { signal } = productsSortAbort;
 
-  const { itemSelector, getIds, setIds, reorderUrl, onReload } = config;
+  const {
+    itemSelector,
+    getIds,
+    setIds,
+    reorderUrl,
+    onReload,
+    autoPersist = true,
+    onOrderChange,
+  } = config;
+
   let draggedRow = null;
+
+  const finishLocalReorder = (nextOrder) => {
+    setIds(nextOrder);
+    syncSortViews(root, nextOrder);
+    refreshSortNumbers(root);
+    onOrderChange?.(nextOrder);
+  };
 
   root.addEventListener('click', async (e) => {
     if (productsListLoading) return;
@@ -90,15 +141,20 @@ function bindSortableList(root, config) {
     const nextOrder = swapSortIds(currentOrder.length ? currentOrder : getIds(), id, delta);
     if (!nextOrder) return;
 
-    root.querySelectorAll('.admin-sort-btn').forEach(b => { b.disabled = true; });
-    try {
-      await persistSortOrder(reorderUrl, nextOrder);
-      setIds(nextOrder);
-      await onReload();
-    } catch (err) {
-      alert(err.message);
-      await onReload();
+    if (autoPersist) {
+      root.querySelectorAll('.admin-sort-btn').forEach(b => { b.disabled = true; });
+      try {
+        await persistSortOrder(reorderUrl, nextOrder);
+        setIds(nextOrder);
+        await onReload();
+      } catch (err) {
+        alert(err.message);
+        await onReload();
+      }
+      return;
     }
+
+    finishLocalReorder(nextOrder);
   }, { signal });
 
   root.addEventListener('dragstart', (e) => {
@@ -150,16 +206,22 @@ function bindSortableList(root, config) {
 
     syncSortViews(root, nextOrder);
 
-    try {
-      await persistSortOrder(reorderUrl, nextOrder);
-      setIds(nextOrder);
-      await onReload();
-    } catch (err) {
-      alert(err.message);
-      await onReload();
-    } finally {
-      draggedRow = null;
+    if (autoPersist) {
+      try {
+        await persistSortOrder(reorderUrl, nextOrder);
+        setIds(nextOrder);
+        await onReload();
+      } catch (err) {
+        alert(err.message);
+        await onReload();
+      } finally {
+        draggedRow = null;
+      }
+      return;
     }
+
+    finishLocalReorder(nextOrder);
+    draggedRow = null;
   }, { signal });
 }
 
@@ -323,7 +385,14 @@ async function loadProductsList() {
   }
 
   container.innerHTML = `
-    ${canSortProducts ? '<p class="admin-section-hint">Порядок товаров в каталоге: перетащите ⋮⋮ или нажмите ↑↓</p>' : ''}
+    ${canSortProducts ? `
+      <div class="admin-sort-toolbar">
+        <p class="admin-section-hint">Порядок в каталоге: перетащите ⋮⋮ или нажмите ↑↓, затем «Сохранить порядок»</p>
+        <div class="admin-sort-toolbar-actions">
+          <button type="button" class="btn btn-primary btn-sm" id="save-product-order" disabled>Сохранить порядок</button>
+          <button type="button" class="btn btn-outline btn-sm" id="cancel-product-order" disabled>Отменить</button>
+        </div>
+      </div>` : ''}
     ${isProductListFiltered() ? '<p class="admin-section-hint">Показаны отфильтрованные товары. Сортировка каталога доступна без фильтров.</p>' : ''}
     <div class="admin-desktop-only">
       <table class="data-table data-table-compact">
@@ -375,13 +444,21 @@ async function loadProductsList() {
   bindProductActions(container, allProducts);
 
   if (canSortProducts) {
+    setProductSortDirty(false);
+    document.getElementById('save-product-order')?.addEventListener('click', saveProductSortOrder);
+    document.getElementById('cancel-product-order')?.addEventListener('click', cancelProductSortOrder);
+
     bindSortableList(container, {
       itemSelector: '[data-sort-id]',
       getIds: () => productSortIds,
       setIds: (ids) => { productSortIds = ids; },
       reorderUrl: '/api/admin/products/reorder',
       onReload: loadProductsList,
+      autoPersist: false,
+      onOrderChange: () => setProductSortDirty(true),
     });
+  } else {
+    productSortDirty = false;
   }
   } finally {
     productsListLoading = false;

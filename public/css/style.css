@@ -1755,6 +1755,26 @@ body.has-mini-cart-bar:not(.cart-page) .site-footer {
   line-height: 1.4;
 }
 
+.admin-sort-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-bottom: 12px;
+}
+
+.admin-sort-toolbar .admin-section-hint {
+  margin: 0;
+  flex: 1 1 220px;
+}
+
+.admin-sort-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .admin-sort-controls {
   display: inline-flex;
   align-items: center;
