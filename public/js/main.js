@@ -25,9 +25,11 @@ async function loadCategories() {
     const categories = await api('/api/categories');
 
     container.innerHTML = `
-      <button class="category-chip active" data-filter="">Все</button>
+      <button class="category-chip${activeCategory === '' && activeTag === '' ? ' active' : ''}" data-filter="">Все</button>
+      <button class="category-chip category-chip-highlight${activeCategory === 'new' && activeTag === 'new' ? ' active' : ''}" data-filter="new">Новинки</button>
+      <button class="category-chip category-chip-highlight${activeCategory === 'sale' && activeTag === 'sale' ? ' active' : ''}" data-filter="sale">Акции</button>
       ${categories.map(c => `
-        <button class="category-chip" data-filter="cat-${c.id}">${escapeHtml(c.name)}</button>
+        <button class="category-chip${activeCategory === `cat-${c.id}` ? ' active' : ''}" data-filter="cat-${c.id}">${escapeHtml(c.name)}</button>
       `).join('')}
     `;
 
@@ -37,12 +39,14 @@ async function loadCategories() {
 
       chip.addEventListener('click', () => {
 
-        container.querySelectorAll('.category-chip').forEach(c => c.classList.remove('active'));
+        const filter = chip.dataset.filter;
+        activeCategory = filter;
+        if (filter === 'new') activeTag = 'new';
+        else if (filter === 'sale') activeTag = 'sale';
+        else activeTag = '';
 
-        chip.classList.add('active');
-
-        activeCategory = chip.dataset.filter;
-
+        syncCategoryChips();
+        syncCatalogFilterMenu();
         renderProducts();
 
       });
@@ -55,6 +59,36 @@ async function loadCategories() {
 
   }
 
+}
+
+
+
+function syncCategoryChips() {
+  const container = document.getElementById('category-filters');
+  if (!container) return;
+
+  container.querySelectorAll('.category-chip').forEach(chip => {
+    const filter = chip.dataset.filter;
+    let isActive = false;
+    if (filter === '') {
+      isActive = activeCategory === '' && activeTag === '';
+    } else if (filter === 'new' || filter === 'sale') {
+      isActive = activeCategory === filter && activeTag === filter;
+    } else {
+      isActive = activeCategory === filter && activeTag === '';
+    }
+    chip.classList.toggle('active', isActive);
+  });
+}
+
+function syncCatalogFilterMenu() {
+  const menu = document.getElementById('catalog-filter-menu');
+  if (!menu) return;
+
+  menu.querySelectorAll('[data-tag]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tag === activeTag);
+  });
+  updateCatalogFilterLabel();
 }
 
 
@@ -109,7 +143,12 @@ function setupCatalogFilterDropdown() {
   menu.querySelectorAll('[data-tag]').forEach(btn => {
     btn.addEventListener('click', () => {
       activeTag = btn.dataset.tag;
+      if (activeTag === 'new') activeCategory = 'new';
+      else if (activeTag === 'sale') activeCategory = 'sale';
+      else activeCategory = '';
+
       menu.querySelectorAll('[data-tag]').forEach(b => b.classList.toggle('active', b === btn));
+      syncCategoryChips();
       updateCatalogFilterLabel();
       renderProducts();
       setCatalogFilterMenuOpen(false);
