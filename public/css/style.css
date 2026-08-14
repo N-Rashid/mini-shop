@@ -1466,6 +1466,47 @@ nav a.active {
   100% { transform: scale(1); }
 }
 
+.scroll-to-top {
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 115;
+  width: 46px;
+  height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 6px 20px rgba(232, 67, 147, 0.35);
+  cursor: pointer;
+  transition: transform 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease;
+}
+
+.scroll-to-top[hidden] {
+  display: none !important;
+}
+
+.scroll-to-top svg {
+  width: 22px;
+  height: 22px;
+}
+
+.scroll-to-top:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(232, 67, 147, 0.42);
+}
+
+.scroll-to-top:active {
+  transform: translateY(0);
+}
+
+body.has-mini-cart-bar:not(.cart-page) .scroll-to-top {
+  bottom: calc(96px + env(safe-area-inset-bottom));
+}
+
 body.has-mini-cart-bar:not(.cart-page) {
   padding-bottom: calc(92px + env(safe-area-inset-bottom));
 }

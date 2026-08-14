@@ -416,6 +416,44 @@ function formatCartCount(count) {
   return `${count} товаров`;
 }
 
+function initScrollToTop() {
+  if (document.body.classList.contains('admin-page') || document.getElementById('scroll-to-top')) {
+    return;
+  }
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.id = 'scroll-to-top';
+  btn.className = 'scroll-to-top';
+  btn.hidden = true;
+  btn.setAttribute('aria-label', 'Наверх');
+  btn.innerHTML = `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 19V5"></path>
+      <path d="M5 12l7-7 7 7"></path>
+    </svg>`;
+  document.body.appendChild(btn);
+
+  let ticking = false;
+  const updateVisibility = () => {
+    btn.hidden = window.scrollY < 320;
+    ticking = false;
+  };
+
+  window.addEventListener('scroll', () => {
+    if (!ticking) {
+      ticking = true;
+      requestAnimationFrame(updateVisibility);
+    }
+  }, { passive: true });
+
+  btn.addEventListener('click', () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
+  updateVisibility();
+}
+
 function initMiniCartBar() {
   if (document.body.classList.contains('cart-page') || document.getElementById('mini-cart-bar')) {
     return;
@@ -1060,6 +1098,7 @@ function bootSiteChrome() {
   initSiteFooter();
   initStaticModalScrollLocks();
   initMiniCartBar();
+  initScrollToTop();
   Cart.updateBadge();
   updateMiniCartBar();
   loadUserInfo();
