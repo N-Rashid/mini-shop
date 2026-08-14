@@ -61,16 +61,22 @@ function syncSortViews(root, ids) {
 function readCurrentSortIds(root) {
   const desktop = root.querySelector('#products-sortable');
   const mobile = root.querySelector('#products-sortable-mobile');
+  const desktopWrap = desktop?.closest('.admin-desktop-only');
+  if (desktopWrap && getComputedStyle(desktopWrap).display === 'none') {
+    return readSortIdsFromDom(mobile);
+  }
   const fromDesktop = readSortIdsFromDom(desktop);
   if (fromDesktop.length) return fromDesktop;
   return readSortIdsFromDom(mobile);
 }
 
+function ordersEqual(a, b) {
+  return a.length === b.length && a.every((id, index) => id === b[index]);
+}
+
 function setProductSortDirty(dirty) {
   productSortDirty = dirty;
-  const saveBtn = document.getElementById('save-product-order');
   const cancelBtn = document.getElementById('cancel-product-order');
-  if (saveBtn) saveBtn.disabled = !dirty;
   if (cancelBtn) cancelBtn.disabled = !dirty;
 }
 
@@ -80,7 +86,10 @@ async function saveProductSortOrder() {
   if (!order.length) return;
 
   const saveBtn = document.getElementById('save-product-order');
-  if (saveBtn) saveBtn.disabled = true;
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Сохранение...';
+  }
 
   try {
     await persistSortOrder('/api/admin/products/reorder', order);
@@ -92,6 +101,11 @@ async function saveProductSortOrder() {
   } catch (err) {
     alert(err.message);
     setProductSortDirty(true);
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Сохранить порядок';
+    }
   }
 }
 
@@ -118,12 +132,22 @@ function bindSortableList(root, config) {
   } = config;
 
   let draggedRow = null;
+  let dragStartOrder = null;
 
   const finishLocalReorder = (nextOrder) => {
     setIds(nextOrder);
     syncSortViews(root, nextOrder);
     refreshSortNumbers(root);
     onOrderChange?.(nextOrder);
+  };
+
+  const finalizeDragReorder = () => {
+    if (!draggedRow) return;
+    const sortContainer = draggedRow.closest('#products-sortable, #products-sortable-mobile');
+    const nextOrder = readSortIdsFromDom(sortContainer);
+    if (!nextOrder.length) return;
+    if (dragStartOrder && ordersEqual(nextOrder, dragStartOrder)) return;
+    finishLocalReorder(nextOrder);
   };
 
   root.addEventListener('click', async (e) => {
@@ -163,15 +187,18 @@ function bindSortableList(root, config) {
     if (!handle || !root.contains(handle)) return;
     draggedRow = handle.closest(itemSelector);
     if (!draggedRow) return;
+    dragStartOrder = readCurrentSortIds(root);
     draggedRow.classList.add('sortable-dragging');
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', draggedRow.dataset.sortId || '');
   }, { signal });
 
   root.addEventListener('dragend', () => {
+    if (!autoPersist) finalizeDragReorder();
     draggedRow?.classList.remove('sortable-dragging');
     root.querySelectorAll(itemSelector).forEach(el => el.classList.remove('sortable-over'));
     draggedRow = null;
+    dragStartOrder = null;
   }, { signal });
 
   root.addEventListener('dragover', (e) => {
@@ -194,17 +221,15 @@ function bindSortableList(root, config) {
   }, { signal });
 
   root.addEventListener('drop', async (e) => {
-    if (productsListLoading) return;
-    const item = e.target.closest(itemSelector);
-    if (!item || !root.contains(item) || !draggedRow) return;
+    if (productsListLoading || !draggedRow) return;
     e.preventDefault();
-    item.classList.remove('sortable-over');
+    root.querySelectorAll(itemSelector).forEach(el => el.classList.remove('sortable-over'));
 
     const sortContainer = draggedRow.closest('#products-sortable, #products-sortable-mobile');
     const nextOrder = readSortIdsFromDom(sortContainer);
+    draggedRow = null;
+    dragStartOrder = null;
     if (!nextOrder.length) return;
-
-    syncSortViews(root, nextOrder);
 
     if (autoPersist) {
       try {
@@ -214,14 +239,11 @@ function bindSortableList(root, config) {
       } catch (err) {
         alert(err.message);
         await onReload();
-      } finally {
-        draggedRow = null;
       }
       return;
     }
 
     finishLocalReorder(nextOrder);
-    draggedRow = null;
   }, { signal });
 }
 
@@ -389,7 +411,7 @@ async function loadProductsList() {
       <div class="admin-sort-toolbar">
         <p class="admin-section-hint">Порядок в каталоге: перетащите ⋮⋮ или нажмите ↑↓, затем «Сохранить порядок»</p>
         <div class="admin-sort-toolbar-actions">
-          <button type="button" class="btn btn-primary btn-sm" id="save-product-order" disabled>Сохранить порядок</button>
+          <button type="button" class="btn btn-primary btn-sm" id="save-product-order">Сохранить порядок</button>
           <button type="button" class="btn btn-outline btn-sm" id="cancel-product-order" disabled>Отменить</button>
         </div>
       </div>` : ''}
@@ -445,9 +467,6 @@ async function loadProductsList() {
 
   if (canSortProducts) {
     setProductSortDirty(false);
-    document.getElementById('save-product-order')?.addEventListener('click', saveProductSortOrder);
-    document.getElementById('cancel-product-order')?.addEventListener('click', cancelProductSortOrder);
-
     bindSortableList(container, {
       itemSelector: '[data-sort-id]',
       getIds: () => productSortIds,
@@ -515,5 +534,17 @@ async function loadProductsList() {
 
   setupProductFilters();
   await loadProductCategoryOptions();
+
+  document.getElementById('products-list')?.addEventListener('click', (e) => {
+    if (e.target.closest('#save-product-order')) {
+      e.preventDefault();
+      saveProductSortOrder();
+    }
+    if (e.target.closest('#cancel-product-order')) {
+      e.preventDefault();
+      cancelProductSortOrder();
+    }
+  });
+
   loadProductsList();
 })();
