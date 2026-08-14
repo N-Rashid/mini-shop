@@ -1434,6 +1434,25 @@ def admin_create_product():
     return jsonify(result), 201
 
 
+def normalize_product_reorder(conn, order):
+    normalized = []
+    seen = set()
+    for raw_id in order:
+        product_id = int(raw_id)
+        if product_id in seen:
+            continue
+        seen.add(product_id)
+        normalized.append(product_id)
+
+    rows = conn.execute(
+        'SELECT id FROM products WHERE deleted_at IS NULL ORDER BY sort_order ASC, id ASC'
+    ).fetchall()
+    for row in rows:
+        if row['id'] not in seen:
+            normalized.append(row['id'])
+    return normalized
+
+
 @app.put('/api/admin/products/reorder')
 @require_admin
 def admin_reorder_products():
@@ -1444,10 +1463,11 @@ def admin_reorder_products():
 
     conn = get_db()
     try:
-        for idx, product_id in enumerate(order):
+        normalized = normalize_product_reorder(conn, order)
+        for idx, product_id in enumerate(normalized):
             updated = conn.execute(
                 'UPDATE products SET sort_order = ? WHERE id = ? AND deleted_at IS NULL',
-                (idx + 1, int(product_id)),
+                (idx + 1, product_id),
             ).rowcount
             if not updated:
                 raise ValueError(f'Товар #{product_id} не найден')

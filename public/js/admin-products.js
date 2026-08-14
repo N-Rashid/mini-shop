@@ -3,6 +3,8 @@ let productFilter = 'all';
 let productSearchQuery = '';
 let productCategoryFilter = '';
 let productSortIds = [];
+let productsListLoading = false;
+let productsSortAbort = null;
 
 function sortControlsHtml(id, enabled = true) {
   if (!enabled) return '';
@@ -55,14 +57,27 @@ function syncSortViews(root, ids) {
   refreshSortNumbers(root);
 }
 
+function readCurrentSortIds(root) {
+  const desktop = root.querySelector('#products-sortable');
+  const mobile = root.querySelector('#products-sortable-mobile');
+  const fromDesktop = readSortIdsFromDom(desktop);
+  if (fromDesktop.length) return fromDesktop;
+  return readSortIdsFromDom(mobile);
+}
+
 function bindSortableList(root, config) {
-  if (!root || root.dataset.sortBound === '1') return;
-  root.dataset.sortBound = '1';
+  if (!root) return;
+
+  productsSortAbort?.abort();
+  productsSortAbort = new AbortController();
+  const { signal } = productsSortAbort;
 
   const { itemSelector, getIds, setIds, reorderUrl, onReload } = config;
   let draggedRow = null;
 
   root.addEventListener('click', async (e) => {
+    if (productsListLoading) return;
+
     const upBtn = e.target.closest('[data-sort-up]');
     const downBtn = e.target.closest('[data-sort-down]');
     const btn = upBtn || downBtn;
@@ -71,7 +86,8 @@ function bindSortableList(root, config) {
     e.preventDefault();
     const id = parseInt(upBtn ? upBtn.dataset.sortUp : downBtn.dataset.sortDown, 10);
     const delta = upBtn ? -1 : 1;
-    const nextOrder = swapSortIds(getIds(), id, delta);
+    const currentOrder = readCurrentSortIds(root);
+    const nextOrder = swapSortIds(currentOrder.length ? currentOrder : getIds(), id, delta);
     if (!nextOrder) return;
 
     root.querySelectorAll('.admin-sort-btn').forEach(b => { b.disabled = true; });
@@ -83,9 +99,10 @@ function bindSortableList(root, config) {
       alert(err.message);
       await onReload();
     }
-  });
+  }, { signal });
 
   root.addEventListener('dragstart', (e) => {
+    if (productsListLoading) return;
     const handle = e.target.closest('[data-sort-handle]');
     if (!handle || !root.contains(handle)) return;
     draggedRow = handle.closest(itemSelector);
@@ -93,13 +110,13 @@ function bindSortableList(root, config) {
     draggedRow.classList.add('sortable-dragging');
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', draggedRow.dataset.sortId || '');
-  });
+  }, { signal });
 
   root.addEventListener('dragend', () => {
     draggedRow?.classList.remove('sortable-dragging');
     root.querySelectorAll(itemSelector).forEach(el => el.classList.remove('sortable-over'));
     draggedRow = null;
-  });
+  }, { signal });
 
   root.addEventListener('dragover', (e) => {
     if (!draggedRow) return;
@@ -113,14 +130,15 @@ function bindSortableList(root, config) {
     if (after) parent.insertBefore(draggedRow, item.nextSibling);
     else parent.insertBefore(draggedRow, item);
     refreshSortNumbers(root);
-  });
+  }, { signal });
 
   root.addEventListener('dragleave', (e) => {
     const item = e.target.closest?.(itemSelector);
     if (item) item.classList.remove('sortable-over');
-  });
+  }, { signal });
 
   root.addEventListener('drop', async (e) => {
+    if (productsListLoading) return;
     const item = e.target.closest(itemSelector);
     if (!item || !root.contains(item) || !draggedRow) return;
     e.preventDefault();
@@ -142,7 +160,7 @@ function bindSortableList(root, config) {
     } finally {
       draggedRow = null;
     }
-  });
+  }, { signal });
 }
 
 function productBadges(p) {
@@ -278,6 +296,8 @@ function bindProductActions(container, products) {
 
 async function loadProductsList() {
   const container = document.getElementById('products-list');
+  productsListLoading = true;
+  try {
   const searchInput = document.getElementById('product-search');
   if (searchInput && searchInput.value !== productSearchQuery) {
     searchInput.value = productSearchQuery;
@@ -363,6 +383,9 @@ async function loadProductsList() {
       onReload: loadProductsList,
     });
   }
+  } finally {
+    productsListLoading = false;
+  }
 }
 
 (async () => {
@@ -402,7 +425,7 @@ async function loadProductsList() {
       showAlert(alertArea, `Товар «${data.name}» добавлен`, 'success');
       form.reset();
       await loadProductCategoryOptions();
-      loadProductsList();
+      await loadProductsList();
     } catch (err) {
       showAlert(alertArea, err.message, 'error');
     } finally {
