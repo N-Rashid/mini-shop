@@ -199,6 +199,15 @@ function productCreatedTime(product) {
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
 }
 
+function productCatalogSortOrder(product) {
+  if (activeCategory.startsWith('cat-')) {
+    const catId = activeCategory.replace('cat-', '');
+    const orders = product.category_sort_orders || {};
+    if (orders[catId] != null) return orders[catId];
+  }
+  return product.sort_order || 0;
+}
+
 function sortProducts(list) {
   const sorted = [...list];
 
@@ -218,7 +227,7 @@ function sortProducts(list) {
       return productCreatedTime(a) - productCreatedTime(b) || a.id - b.id;
     }
 
-    return (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id;
+    return productCatalogSortOrder(a) - productCatalogSortOrder(b) || a.id - b.id;
   });
 
   return sorted;

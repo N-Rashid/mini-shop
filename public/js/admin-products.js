@@ -7,6 +7,7 @@ let productReorderModalDirty = false;
 let productReorderModalOrder = [];
 let productReorderProducts = [];
 let productReorderSource = [];
+let productReorderContext = null;
 let productsListLoading = false;
 let productsSortAbort = null;
 let productReorderSortAbort = null;
@@ -27,8 +28,62 @@ function sortControlsCompactHtml(id, num, total) {
     </div>`;
 }
 
-async function persistSortOrder(url, ids) {
-  await api(url, { method: 'PUT', body: JSON.stringify({ order: ids }) });
+async function persistSortOrder(url, ids, categoryId = null) {
+  const body = { order: ids };
+  if (categoryId) body.category_id = categoryId;
+  await api(url, { method: 'PUT', body: JSON.stringify(body) });
+}
+
+function productCategorySortOrder(product, categoryId) {
+  const orders = product.category_sort_orders || {};
+  const key = String(categoryId);
+  if (orders[key] != null) return orders[key];
+  return product.sort_order || 0;
+}
+
+function sortProductsForCatalogOrder(products, categoryId = null) {
+  return [...products].sort((a, b) => {
+    const aKey = categoryId ? productCategorySortOrder(a, categoryId) : (a.sort_order || 0);
+    const bKey = categoryId ? productCategorySortOrder(b, categoryId) : (b.sort_order || 0);
+    return aKey - bKey || a.id - b.id;
+  });
+}
+
+function getReorderContext() {
+  if (productFilter !== 'all') return null;
+  if (productSearchQuery.trim()) return null;
+  if (productCategoryFilter === 'none') return null;
+
+  if (productCategoryFilter) {
+    const categoryId = parseInt(productCategoryFilter, 10);
+    const category = categories.find(c => c.id === categoryId);
+    return {
+      type: 'category',
+      categoryId,
+      categoryName: category?.name || 'Категория',
+    };
+  }
+
+  return { type: 'global' };
+}
+
+function getReorderProductList(activeProducts) {
+  const ctx = getReorderContext();
+  let list = activeProducts.filter(p => !p.deleted);
+  if (ctx?.type === 'category') {
+    list = list.filter(p => productHasCategory(p, ctx.categoryId));
+    list = sortProductsForCatalogOrder(list, ctx.categoryId);
+  } else {
+    list = sortProductsForCatalogOrder(list);
+  }
+  return list;
+}
+
+function getReorderHintText(ctx) {
+  if (ctx?.type === 'category') {
+    return `Порядок в категории «${ctx.categoryName}» на сайте`;
+  }
+  return 'Порядок на главной (все товары) в каталоге';
 }
 
 function swapSortIds(ids, id, delta) {
@@ -170,6 +225,7 @@ function closeProductReorderModal() {
   document.documentElement.classList.remove('scroll-locked');
   document.body.classList.remove('scroll-locked');
   productReorderModalDirty = false;
+  productReorderContext = null;
 }
 
 async function saveProductReorderModal() {
@@ -184,12 +240,18 @@ async function saveProductReorderModal() {
   }
 
   try {
-    await persistSortOrder('/api/admin/products/reorder', order);
+    const bodyCategoryId = productReorderContext?.type === 'category'
+      ? productReorderContext.categoryId
+      : null;
+    await persistSortOrder('/api/admin/products/reorder', order, bodyCategoryId);
     productSortIds = order;
     closeProductReorderModal();
     await loadProductsList();
     const alertArea = document.getElementById('alert-area');
-    if (alertArea) showAlert(alertArea, 'Порядок товаров сохранён', 'success');
+    const savedWhere = productReorderContext?.type === 'category'
+      ? `в категории «${productReorderContext.categoryName}»`
+      : 'в общем каталоге';
+    if (alertArea) showAlert(alertArea, `Порядок товаров ${savedWhere} сохранён`, 'success');
   } catch (err) {
     alert(err.message);
     if (saveBtn) {
@@ -203,11 +265,17 @@ function openProductReorderModal(activeProducts) {
   const host = document.getElementById('product-reorder-modal');
   if (!host) return;
 
-  productReorderProducts = activeProducts;
-  productReorderModalOrder = activeProducts.map(p => p.id);
+  const ctx = getReorderContext();
+  const reorderProducts = getReorderProductList(activeProducts);
+  productReorderContext = ctx;
+  productReorderProducts = reorderProducts;
+  productReorderModalOrder = reorderProducts.map(p => p.id);
   productReorderModalDirty = false;
-  const productsById = new Map(activeProducts.map(p => [p.id, p]));
-  const longReorderList = activeProducts.length > REORDER_LIST_COLLAPSE_THRESHOLD;
+  const productsById = new Map(reorderProducts.map(p => [p.id, p]));
+  const longReorderList = reorderProducts.length > REORDER_LIST_COLLAPSE_THRESHOLD;
+  const modalTitle = ctx?.type === 'category'
+    ? `Порядок: ${ctx.categoryName} (${reorderProducts.length})`
+    : `Порядок в каталоге (${reorderProducts.length})`;
 
   host.style.display = 'flex';
   host.className = 'modal-overlay product-reorder-overlay';
@@ -215,10 +283,12 @@ function openProductReorderModal(activeProducts) {
     <div class="modal modal-reorder" role="dialog" aria-modal="true" aria-labelledby="product-reorder-title">
       <div class="modal-reorder-header">
         <div class="modal-reorder-title-row">
-          <h2 id="product-reorder-title">Порядок товаров (${activeProducts.length})</h2>
+          <h2 id="product-reorder-title">${escapeHtml(modalTitle)}</h2>
           <p class="admin-section-hint">${longReorderList
     ? 'Длинный список скрыт — найдите товар через поиск или откройте весь список'
-    : 'Перетащите, укажите номер позиции или используйте стрелки'}</p>
+    : ctx?.type === 'category'
+      ? 'Этот порядок виден на сайте при выборе этой категории. Хиты продаж всё равно показываются первыми.'
+      : 'Этот порядок виден на сайте в общем списке «Все товары». Хиты продаж всё равно показываются первыми.'}</p>
         </div>
         <input type="search" id="product-reorder-search" class="admin-products-search" placeholder="Найти товар в списке..." autocomplete="off">
         <div class="admin-sort-toolbar-actions modal-reorder-actions">
@@ -554,7 +624,11 @@ function filterAdminProducts(products) {
 }
 
 function isProductListFiltered() {
-  return Boolean(productSearchQuery.trim() || productCategoryFilter);
+  return Boolean(productSearchQuery.trim() || productCategoryFilter === 'none');
+}
+
+function isProductStatusFiltered() {
+  return productFilter !== 'all';
 }
 
 function syncAdminProductsSections(activeCount, shownCount) {
@@ -622,12 +696,16 @@ async function loadProductsList() {
   }
 
   const allProducts = await api(`/api/admin/products?filter=${productFilter}`);
-  const products = filterAdminProducts(allProducts);
   const activeProducts = allProducts.filter(p => !p.deleted);
-  productSortIds = activeProducts.map(p => p.id);
-  const canSortProducts = productFilter === 'all'
-    && !isProductListFiltered()
-    && activeProducts.length > 1;
+  const reorderContext = getReorderContext();
+  const reorderProducts = getReorderProductList(activeProducts);
+  const products = filterAdminProducts(allProducts);
+  const displayProducts = reorderContext?.type === 'category'
+    ? sortProductsForCatalogOrder(products.filter(p => !p.deleted), reorderContext.categoryId)
+        .concat(products.filter(p => p.deleted))
+    : products;
+  productSortIds = reorderProducts.map(p => p.id);
+  const canSortProducts = Boolean(reorderContext) && reorderProducts.length > 1;
 
   if (!allProducts.length) {
     container.innerHTML = '<p style="color:var(--muted)">Товаров нет</p>';
@@ -653,9 +731,9 @@ async function loadProductsList() {
           </tr>
         </thead>
         <tbody id="products-table-body">
-          ${products.map((p, index) => {
+          ${displayProducts.map((p, index) => {
             const num = canSortProducts && !p.deleted
-              ? activeProducts.findIndex(x => x.id === p.id) + 1
+              ? reorderProducts.findIndex(x => x.id === p.id) + 1
               : index + 1;
             return `
             <tr style="${p.deleted ? 'opacity:0.5' : ''}">
@@ -676,10 +754,10 @@ async function loadProductsList() {
       </table>
     </div>
     <div class="admin-mobile-only admin-cards admin-cards-compact" id="products-cards">
-      ${products.map((p, index) => renderProductCard(
+      ${displayProducts.map((p, index) => renderProductCard(
         p,
         canSortProducts && !p.deleted
-          ? activeProducts.findIndex(x => x.id === p.id) + 1
+          ? reorderProducts.findIndex(x => x.id === p.id) + 1
           : index + 1
       )).join('')}
     </div>`;
@@ -690,7 +768,7 @@ async function loadProductsList() {
       reorderBar.hidden = false;
       reorderBar.innerHTML = `
         <div class="admin-sort-toolbar">
-          <p class="admin-section-hint">Порядок в каталоге на сайте</p>
+          <p class="admin-section-hint">${getReorderHintText(reorderContext)}</p>
           <button type="button" class="btn btn-primary btn-sm" id="open-product-reorder">Изменить порядок</button>
         </div>`;
     } else {
@@ -700,7 +778,8 @@ async function loadProductsList() {
   }
 
   container.innerHTML = `
-    ${isProductListFiltered() ? '<p class="admin-section-hint">Показаны отфильтрованные товары. Сортировка каталога доступна без фильтров.</p>' : ''}
+    ${isProductListFiltered() ? '<p class="admin-section-hint">Показаны отфильтрованные товары. Сортировка доступна для общего списка или одной категории без поиска.</p>' : ''}
+    ${isProductStatusFiltered() ? '<p class="admin-section-hint">Сортировка каталога доступна только во вкладке «Все».</p>' : ''}
     ${productsListHtml}`;
 
   productReorderSource = activeProducts;

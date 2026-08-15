@@ -300,6 +300,17 @@ def migrate_db(conn):
         ''')
         mark_migration(conn, 'product_categories_from_category_id')
 
+    add_column_if_missing(conn, 'product_categories', 'sort_order', 'INTEGER DEFAULT 0')
+
+    if not migration_done(conn, 'product_categories_sort_order_init'):
+        conn.execute('''
+            UPDATE product_categories
+            SET sort_order = COALESCE((
+                SELECT sort_order FROM products WHERE products.id = product_categories.product_id
+            ), 0)
+        ''')
+        mark_migration(conn, 'product_categories_sort_order_init')
+
     conn.executescript('''
         CREATE TABLE IF NOT EXISTS site_settings (
             key TEXT PRIMARY KEY,
@@ -569,15 +580,36 @@ def refresh_product_primary_category(conn, product_id):
     )
 
 
+def get_product_category_sort_orders(conn, product_id):
+    rows = conn.execute(
+        'SELECT category_id, sort_order FROM product_categories WHERE product_id = ?',
+        (product_id,),
+    ).fetchall()
+    return {str(row['category_id']): row['sort_order'] for row in rows}
+
+
 def set_product_categories(conn, product_id, category_ids):
+    existing = {
+        row['category_id']: row['sort_order']
+        for row in conn.execute(
+            'SELECT category_id, sort_order FROM product_categories WHERE product_id = ?',
+            (product_id,),
+        ).fetchall()
+    }
     conn.execute('DELETE FROM product_categories WHERE product_id = ?', (product_id,))
     linked = []
     for cat_id in category_ids:
         if not conn.execute('SELECT id FROM categories WHERE id = ?', (cat_id,)).fetchone():
             continue
+        sort_order = existing.get(cat_id)
+        if sort_order is None:
+            sort_order = conn.execute(
+                'SELECT COALESCE(MAX(sort_order), 0) FROM product_categories WHERE category_id = ?',
+                (cat_id,),
+            ).fetchone()[0] + 1
         conn.execute(
-            'INSERT OR IGNORE INTO product_categories (product_id, category_id) VALUES (?, ?)',
-            (product_id, cat_id),
+            'INSERT INTO product_categories (product_id, category_id, sort_order) VALUES (?, ?, ?)',
+            (product_id, cat_id, sort_order),
         )
         linked.append(cat_id)
     conn.execute(
@@ -612,6 +644,7 @@ def map_product(conn, row):
     cats = get_product_categories(conn, d['id'])
     d['categories'] = cats
     d['category_ids'] = [c['id'] for c in cats]
+    d['category_sort_orders'] = get_product_category_sort_orders(conn, d['id'])
     d['category'] = cats[0] if cats else None
     if not cats and d.get('category_id'):
         cat = conn.execute(
@@ -640,6 +673,14 @@ PRODUCT_SELECT = '''
     id, name, cost, pieces_per_box, weight, description, created_at,
     category_id, price_piece, price_pack, allow_piece_sale,
     is_on_sale, sale_price_pack, sale_price_piece, is_bestseller, sort_order, in_stock
+'''
+
+PRODUCT_SELECT_QUALIFIED = '''
+    products.id, products.name, products.cost, products.pieces_per_box, products.weight,
+    products.description, products.created_at, products.category_id, products.price_piece,
+    products.price_pack, products.allow_piece_sale, products.is_on_sale,
+    products.sale_price_pack, products.sale_price_piece, products.is_bestseller,
+    products.sort_order, products.in_stock
 '''
 
 
@@ -1131,27 +1172,34 @@ def list_products():
     category_id = request.args.get('category')
 
     conn = get_db()
-    sql = f'''
-        SELECT {PRODUCT_SELECT}
-        FROM products WHERE deleted_at IS NULL
-    '''
     params = []
 
     if category_id:
-        sql += '''
-            AND EXISTS (
-                SELECT 1 FROM product_categories pc
-                WHERE pc.product_id = products.id AND pc.category_id = ?
-            )
+        sql = f'''
+            SELECT {PRODUCT_SELECT_QUALIFIED}
+            FROM products
+            JOIN product_categories pc ON pc.product_id = products.id AND pc.category_id = ?
+            WHERE products.deleted_at IS NULL
         '''
         params.append(category_id)
+    else:
+        sql = f'''
+            SELECT {PRODUCT_SELECT}
+            FROM products WHERE deleted_at IS NULL
+        '''
 
     if q:
-        sql += ' AND (name LIKE ? OR description LIKE ?)'
+        if category_id:
+            sql += ' AND (products.name LIKE ? OR products.description LIKE ?)'
+        else:
+            sql += ' AND (name LIKE ? OR description LIKE ?)'
         like = f'%{q}%'
         params.extend([like, like])
 
-    sql += ' ORDER BY is_bestseller DESC, sort_order ASC, id ASC'
+    if category_id:
+        sql += ' ORDER BY products.is_bestseller DESC, pc.sort_order ASC, products.id ASC'
+    else:
+        sql += ' ORDER BY is_bestseller DESC, sort_order ASC, id ASC'
     rows = conn.execute(sql, params).fetchall()
     result = [map_product(conn, r) for r in rows]
     conn.close()
@@ -1472,6 +1520,37 @@ def normalize_product_reorder(conn, order):
     return normalized
 
 
+def normalize_category_product_reorder(conn, category_id, order):
+    normalized = []
+    seen = set()
+    for raw_id in order:
+        product_id = int(raw_id)
+        if product_id in seen:
+            continue
+        in_cat = conn.execute('''
+            SELECT 1
+            FROM product_categories pc
+            JOIN products p ON p.id = pc.product_id
+            WHERE pc.category_id = ? AND pc.product_id = ? AND p.deleted_at IS NULL
+        ''', (category_id, product_id)).fetchone()
+        if not in_cat:
+            continue
+        seen.add(product_id)
+        normalized.append(product_id)
+
+    rows = conn.execute('''
+        SELECT pc.product_id AS id
+        FROM product_categories pc
+        JOIN products p ON p.id = pc.product_id
+        WHERE pc.category_id = ? AND p.deleted_at IS NULL
+        ORDER BY pc.sort_order ASC, pc.product_id ASC
+    ''', (category_id,)).fetchall()
+    for row in rows:
+        if row['id'] not in seen:
+            normalized.append(row['id'])
+    return normalized
+
+
 @app.put('/api/admin/products/reorder')
 @require_admin
 def admin_reorder_products():
@@ -1480,16 +1559,35 @@ def admin_reorder_products():
     if not isinstance(order, list) or not order:
         return jsonify({'error': 'Укажите порядок товаров'}), 400
 
+    category_id = data.get('category_id')
     conn = get_db()
     try:
-        normalized = normalize_product_reorder(conn, order)
-        for idx, product_id in enumerate(normalized):
-            updated = conn.execute(
-                'UPDATE products SET sort_order = ? WHERE id = ? AND deleted_at IS NULL',
-                (idx + 1, product_id),
-            ).rowcount
-            if not updated:
-                raise ValueError(f'Товар #{product_id} не найден')
+        if category_id is not None and category_id != '':
+            category_id = int(category_id)
+            category = conn.execute(
+                'SELECT id FROM categories WHERE id = ? AND deleted_at IS NULL',
+                (category_id,),
+            ).fetchone()
+            if not category:
+                raise ValueError('Категория не найдена')
+            normalized = normalize_category_product_reorder(conn, category_id, order)
+            for idx, product_id in enumerate(normalized):
+                updated = conn.execute(
+                    '''UPDATE product_categories SET sort_order = ?
+                       WHERE product_id = ? AND category_id = ?''',
+                    (idx + 1, product_id, category_id),
+                ).rowcount
+                if not updated:
+                    raise ValueError(f'Товар #{product_id} не найден в категории')
+        else:
+            normalized = normalize_product_reorder(conn, order)
+            for idx, product_id in enumerate(normalized):
+                updated = conn.execute(
+                    'UPDATE products SET sort_order = ? WHERE id = ? AND deleted_at IS NULL',
+                    (idx + 1, product_id),
+                ).rowcount
+                if not updated:
+                    raise ValueError(f'Товар #{product_id} не найден')
         conn.commit()
     except ValueError as exc:
         conn.rollback()
