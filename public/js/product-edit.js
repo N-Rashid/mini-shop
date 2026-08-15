@@ -50,14 +50,14 @@ async function openProductEditModal(productId, products, onSaved) {
             <input name="price_piece" type="number" step="0.01" min="0" value="${p.price_piece || 0}">
           </div>
           <div class="form-group">
-            <label>Цена за упаковку (₽) *</label>
-            <input name="price_pack" type="number" step="0.01" min="0" value="${p.price_pack}" required>
+            <label>Штук в упаковке</label>
+            <input name="pieces_per_pack" type="number" min="1" value="${p.pieces_per_pack}">
           </div>
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>Штук в упаковке</label>
-            <input name="pieces_per_pack" type="number" min="1" value="${p.pieces_per_pack}">
+            <label>Цена за упаковку (₽) *</label>
+            <input name="price_pack" type="number" step="0.01" min="0" value="${p.price_pack}" required>
           </div>
           <div class="form-group">
             <label>Вес штуки (г)</label>
