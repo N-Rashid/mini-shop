@@ -34,6 +34,15 @@ function escapeHtml(str) {
   return d.innerHTML;
 }
 
+function adminCollapsibleHtml(contentHtml, count, label, threshold = 10) {
+  if (count <= threshold) return contentHtml;
+  return `
+    <details class="admin-collapsible-section">
+      <summary class="admin-collapsible-summary">${escapeHtml(label)} (${count})</summary>
+      <div class="admin-collapsible-body">${contentHtml}</div>
+    </details>`;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('admin-logout')?.addEventListener('click', (e) => {
     e.preventDefault();

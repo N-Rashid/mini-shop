@@ -335,7 +335,7 @@ async function loadCategories() {
     return;
   }
 
-  list.innerHTML = `
+  const categoriesBodyHtml = `
     ${canSortCategories ? `
       <div class="admin-sort-toolbar">
         <p class="admin-section-hint">Порядок на сайте: перетащите ⋮⋮ или нажмите ↑↓, затем «Сохранить порядок»</p>
@@ -388,6 +388,13 @@ async function loadCategories() {
         index + 1
       )).join('')}
     </div>`;
+
+  list.innerHTML = adminCollapsibleHtml(
+    categoriesBodyHtml,
+    categories.length,
+    'Список категорий',
+    10
+  );
 
   bindCategoryActions(list);
 

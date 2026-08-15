@@ -22,8 +22,30 @@
         <h1>Товары</h1>
         <div id="alert-area"></div>
 
-        <section class="admin-section">
-          <h2 class="admin-section-title">Добавить товар</h2>
+        <details id="products-list-section" class="admin-collapsible-section" open>
+          <summary class="admin-collapsible-summary" id="products-list-summary">Список товаров</summary>
+          <div class="admin-collapsible-body">
+        <div id="products-reorder-bar" class="admin-reorder-bar" hidden></div>
+        <div id="product-filters" class="category-filters" style="justify-content:flex-start;margin-bottom:12px">
+          <button class="filter-chip category-chip active" data-filter="all">Все</button>
+          <button class="filter-chip category-chip" data-filter="new">Новые</button>
+          <button class="filter-chip category-chip" data-filter="out_of_stock">Нет в наличии</button>
+          <button class="filter-chip category-chip" data-filter="deleted">Удалённые</button>
+        </div>
+        <div class="admin-products-toolbar">
+          <input type="search" id="product-search" class="admin-products-search" placeholder="Поиск по названию..." autocomplete="off">
+          <select id="product-category-filter" class="admin-products-category-filter" aria-label="Категория">
+            <option value="">Все категории</option>
+          </select>
+        </div>
+        <div id="products-list"></div>
+          </div>
+        </details>
+
+        <details id="add-product-section" class="admin-collapsible-section" open>
+          <summary class="admin-collapsible-summary">Добавить товар</summary>
+          <div class="admin-collapsible-body">
+        <section class="admin-section admin-section-flat">
           <form id="add-product-form" enctype="multipart/form-data">
             <div class="form-group">
               <label for="add-product-name">Название *</label>
@@ -93,26 +115,14 @@
             <button type="submit" class="btn btn-primary">Добавить товар</button>
           </form>
         </section>
-
-        <h2 class="admin-section-title">Список товаров</h2>
-        <div id="product-filters" class="category-filters" style="justify-content:flex-start;margin-bottom:12px">
-          <button class="filter-chip category-chip active" data-filter="all">Все</button>
-          <button class="filter-chip category-chip" data-filter="new">Новые</button>
-          <button class="filter-chip category-chip" data-filter="out_of_stock">Нет в наличии</button>
-          <button class="filter-chip category-chip" data-filter="deleted">Удалённые</button>
-        </div>
-        <div class="admin-products-toolbar">
-          <input type="search" id="product-search" class="admin-products-search" placeholder="Поиск по названию..." autocomplete="off">
-          <select id="product-category-filter" class="admin-products-category-filter" aria-label="Категория">
-            <option value="">Все категории</option>
-          </select>
-        </div>
-        <div id="products-list"></div>
+          </div>
+        </details>
       </div>
     </div>
   </main>
 
   <div id="edit-modal" style="display:none"></div>
+  <div id="product-reorder-modal" style="display:none"></div>
 
   <script src="/js/common.js"></script>
   <script src="/js/product-edit.js"></script>

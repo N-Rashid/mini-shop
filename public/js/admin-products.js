@@ -3,17 +3,27 @@ let productFilter = 'all';
 let productSearchQuery = '';
 let productCategoryFilter = '';
 let productSortIds = [];
-let productSortDirty = false;
+let productReorderModalDirty = false;
+let productReorderModalOrder = [];
+let productReorderProducts = [];
+let productReorderSource = [];
 let productsListLoading = false;
 let productsSortAbort = null;
+let productReorderSortAbort = null;
 
-function sortControlsHtml(id, enabled = true) {
-  if (!enabled) return '';
+const PRODUCT_SORT_LIST_SELECTOR = '#product-reorder-list, #products-sortable, #products-sortable-mobile';
+const ADMIN_PRODUCTS_COLLAPSE_THRESHOLD = 10;
+const REORDER_LIST_COLLAPSE_THRESHOLD = 12;
+
+function sortControlsCompactHtml(id, num, total) {
   return `
-    <div class="admin-sort-controls">
+    <div class="admin-sort-controls admin-sort-controls-compact">
       <button type="button" class="admin-sort-handle" data-sort-handle="${id}" draggable="true" title="Перетащить" aria-label="Перетащить">⋮⋮</button>
+      <button type="button" class="admin-sort-btn" data-sort-top="${id}" title="В начало" aria-label="В начало">⤒</button>
       <button type="button" class="admin-sort-btn" data-sort-up="${id}" aria-label="Выше">↑</button>
+      <input type="number" class="admin-sort-pos-input" min="1" max="${total}" value="${num}" data-sort-pos="${id}" aria-label="Позиция">
       <button type="button" class="admin-sort-btn" data-sort-down="${id}" aria-label="Ниже">↓</button>
+      <button type="button" class="admin-sort-btn" data-sort-bottom="${id}" title="В конец" aria-label="В конец">⤓</button>
     </div>`;
 }
 
@@ -36,17 +46,46 @@ function readSortIdsFromDom(container) {
   return [...container.querySelectorAll('[data-sort-id]')].map(el => parseInt(el.dataset.sortId, 10));
 }
 
+function moveToPosition(ids, id, position) {
+  const order = [...ids];
+  const from = order.indexOf(id);
+  if (from < 0) return null;
+  const to = Math.max(0, Math.min(order.length - 1, position - 1));
+  if (from === to) return order;
+  order.splice(from, 1);
+  order.splice(to, 0, id);
+  return order;
+}
+
+function updateSortRowNumbers(el, num, total) {
+  el.querySelectorAll('.admin-row-num').forEach(cell => {
+    cell.textContent = cell.closest('.admin-card-name') ? `${num}.` : String(num);
+  });
+  el.querySelectorAll('.admin-sort-pos-input').forEach(input => {
+    input.value = num;
+    input.max = total;
+  });
+}
+
 function refreshSortNumbers(root) {
+  const reorderList = root.querySelector('#product-reorder-list');
+  if (reorderList) {
+    const rows = reorderList.querySelectorAll('[data-sort-id]');
+    rows.forEach((el, index) => updateSortRowNumbers(el, index + 1, rows.length));
+    return;
+  }
+
   root.querySelectorAll('#products-sortable [data-sort-id], #products-sortable-mobile [data-sort-id]').forEach((el, index) => {
-    const num = index + 1;
-    el.querySelectorAll('.admin-row-num').forEach(cell => {
-      cell.textContent = cell.closest('.admin-card-name') ? `${num}.` : String(num);
-    });
+    updateSortRowNumbers(el, index + 1, 0);
   });
 }
 
 function syncSortViews(root, ids) {
-  ['#products-sortable', '#products-sortable-mobile'].forEach(selector => {
+  const selectors = root.querySelector('#product-reorder-list')
+    ? ['#product-reorder-list']
+    : ['#products-sortable', '#products-sortable-mobile'];
+
+  selectors.forEach(selector => {
     const container = root.querySelector(selector);
     if (!container) return;
     const insertBefore = [...container.children].find(el => !el.matches('[data-sort-id]')) || null;
@@ -59,6 +98,9 @@ function syncSortViews(root, ids) {
 }
 
 function readCurrentSortIds(root) {
+  const reorderList = root.querySelector('#product-reorder-list');
+  if (reorderList) return readSortIdsFromDom(reorderList);
+
   const desktop = root.querySelector('#products-sortable');
   const mobile = root.querySelector('#products-sortable-mobile');
   const desktopWrap = desktop?.closest('.admin-desktop-only');
@@ -74,18 +116,68 @@ function ordersEqual(a, b) {
   return a.length === b.length && a.every((id, index) => id === b[index]);
 }
 
-function setProductSortDirty(dirty) {
-  productSortDirty = dirty;
-  const cancelBtn = document.getElementById('cancel-product-order');
-  if (cancelBtn) cancelBtn.disabled = !dirty;
+function renderProductReorderRows(root, productsById, order, query = '') {
+  const list = root.querySelector('#product-reorder-list');
+  if (!list) return;
+
+  const q = query.trim().toLowerCase();
+  list.innerHTML = order.map((id, index) => {
+    const product = productsById.get(id);
+    if (!product) return '';
+    const hidden = q && !(product.name || '').toLowerCase().includes(q);
+    return `
+      <div class="product-reorder-row"${hidden ? ' hidden' : ''} data-sort-id="${id}">
+        <span class="admin-row-num product-reorder-num">${index + 1}</span>
+        ${sortControlsCompactHtml(id, index + 1, order.length)}
+        <span class="product-reorder-name">${escapeHtml(product.name)}</span>
+      </div>`;
+  }).join('');
+  refreshSortNumbers(root);
 }
 
-async function saveProductSortOrder() {
-  const container = document.getElementById('products-list');
-  const order = readCurrentSortIds(container);
+function filterProductReorderSearch(root, query) {
+  const q = query.trim().toLowerCase();
+  const list = root.querySelector('#product-reorder-list');
+  if (q.length >= 2) {
+    setReorderListCollapsed(root, false);
+  } else if (list?.dataset.autoCollapse === '1') {
+    setReorderListCollapsed(root, true);
+  }
+
+  root.querySelectorAll('#product-reorder-list [data-sort-id]').forEach(row => {
+    const name = row.querySelector('.product-reorder-name')?.textContent.toLowerCase() || '';
+    row.hidden = Boolean(q && !name.includes(q));
+  });
+}
+
+function setReorderListCollapsed(root, collapsed) {
+  root.classList.toggle('product-reorder--list-collapsed', collapsed);
+  const btn = root.querySelector('#toggle-product-reorder-list');
+  const count = root.querySelectorAll('#product-reorder-list [data-sort-id]').length;
+  if (btn) {
+    btn.textContent = collapsed ? `Показать весь список (${count})` : 'Скрыть список';
+    btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  }
+}
+
+function closeProductReorderModal() {
+  productReorderSortAbort?.abort();
+  productReorderSortAbort = null;
+  const host = document.getElementById('product-reorder-modal');
+  if (!host) return;
+  host.innerHTML = '';
+  host.style.display = 'none';
+  document.documentElement.classList.remove('scroll-locked');
+  document.body.classList.remove('scroll-locked');
+  productReorderModalDirty = false;
+}
+
+async function saveProductReorderModal() {
+  const host = document.getElementById('product-reorder-modal');
+  const order = readCurrentSortIds(host);
   if (!order.length) return;
 
-  const saveBtn = document.getElementById('save-product-order');
+  const saveBtn = host.querySelector('#save-product-reorder-modal');
   if (saveBtn) {
     saveBtn.disabled = true;
     saveBtn.textContent = 'Сохранение...';
@@ -94,14 +186,12 @@ async function saveProductSortOrder() {
   try {
     await persistSortOrder('/api/admin/products/reorder', order);
     productSortIds = order;
-    setProductSortDirty(false);
+    closeProductReorderModal();
     await loadProductsList();
     const alertArea = document.getElementById('alert-area');
     if (alertArea) showAlert(alertArea, 'Порядок товаров сохранён', 'success');
   } catch (err) {
     alert(err.message);
-    setProductSortDirty(true);
-  } finally {
     if (saveBtn) {
       saveBtn.disabled = false;
       saveBtn.textContent = 'Сохранить порядок';
@@ -109,17 +199,94 @@ async function saveProductSortOrder() {
   }
 }
 
-function cancelProductSortOrder() {
-  setProductSortDirty(false);
-  loadProductsList();
+function openProductReorderModal(activeProducts) {
+  const host = document.getElementById('product-reorder-modal');
+  if (!host) return;
+
+  productReorderProducts = activeProducts;
+  productReorderModalOrder = activeProducts.map(p => p.id);
+  productReorderModalDirty = false;
+  const productsById = new Map(activeProducts.map(p => [p.id, p]));
+  const longReorderList = activeProducts.length > REORDER_LIST_COLLAPSE_THRESHOLD;
+
+  host.style.display = 'flex';
+  host.className = 'modal-overlay product-reorder-overlay';
+  host.innerHTML = `
+    <div class="modal modal-reorder" role="dialog" aria-modal="true" aria-labelledby="product-reorder-title">
+      <div class="modal-reorder-header">
+        <div class="modal-reorder-title-row">
+          <h2 id="product-reorder-title">Порядок товаров (${activeProducts.length})</h2>
+          <p class="admin-section-hint">${longReorderList
+    ? 'Длинный список скрыт — найдите товар через поиск или откройте весь список'
+    : 'Перетащите, укажите номер позиции или используйте стрелки'}</p>
+        </div>
+        <input type="search" id="product-reorder-search" class="admin-products-search" placeholder="Найти товар в списке..." autocomplete="off">
+        <div class="admin-sort-toolbar-actions modal-reorder-actions">
+          ${longReorderList ? '<button type="button" class="btn btn-outline btn-sm" id="toggle-product-reorder-list">Показать весь список</button>' : ''}
+          <button type="button" class="btn btn-primary btn-sm" id="save-product-reorder-modal">Сохранить порядок</button>
+          <button type="button" class="btn btn-outline btn-sm" id="cancel-product-reorder-modal">Отменить</button>
+        </div>
+      </div>
+      <p class="product-reorder-collapsed-hint">Список скрыт. Введите название в поиск или нажмите «Показать весь список».</p>
+      <div class="product-reorder-list" id="product-reorder-list"${longReorderList ? ' data-auto-collapse="1"' : ''}></div>
+    </div>`;
+
+  document.documentElement.classList.add('scroll-locked');
+  document.body.classList.add('scroll-locked');
+
+  renderProductReorderRows(host, productsById, productReorderModalOrder);
+  if (longReorderList) setReorderListCollapsed(host, true);
+
+  host.querySelector('#product-reorder-search')?.addEventListener('input', (e) => {
+    filterProductReorderSearch(host, e.target.value);
+  });
+
+  host.querySelector('#toggle-product-reorder-list')?.addEventListener('click', () => {
+    const collapsed = host.classList.contains('product-reorder--list-collapsed');
+    setReorderListCollapsed(host, !collapsed);
+    if (!collapsed) {
+      host.querySelector('#product-reorder-search').value = '';
+      filterProductReorderSearch(host, '');
+    }
+  });
+
+  host.querySelector('#save-product-reorder-modal')?.addEventListener('click', saveProductReorderModal);
+  host.querySelector('#cancel-product-reorder-modal')?.addEventListener('click', () => {
+    if (productReorderModalDirty && !confirm('Закрыть без сохранения?')) return;
+    closeProductReorderModal();
+  });
+
+  host.addEventListener('click', (e) => {
+    if (e.target === host) {
+      if (productReorderModalDirty && !confirm('Закрыть без сохранения?')) return;
+      closeProductReorderModal();
+    }
+  });
+
+  bindSortableList(host, {
+    itemSelector: '[data-sort-id]',
+    getIds: () => productReorderModalOrder,
+    setIds: (ids) => { productReorderModalOrder = ids; },
+    reorderUrl: '/api/admin/products/reorder',
+    onReload: () => {},
+    autoPersist: false,
+    onOrderChange: () => { productReorderModalDirty = true; },
+    sortAbortRef: 'productReorder',
+  });
 }
 
 function bindSortableList(root, config) {
   if (!root) return;
 
-  productsSortAbort?.abort();
-  productsSortAbort = new AbortController();
-  const { signal } = productsSortAbort;
+  const useReorderAbort = config.sortAbortRef === 'productReorder';
+  if (useReorderAbort) {
+    productReorderSortAbort?.abort();
+    productReorderSortAbort = new AbortController();
+  } else {
+    productsSortAbort?.abort();
+    productsSortAbort = new AbortController();
+  }
+  const { signal } = useReorderAbort ? productReorderSortAbort : productsSortAbort;
 
   const {
     itemSelector,
@@ -143,7 +310,7 @@ function bindSortableList(root, config) {
 
   const finalizeDragReorder = () => {
     if (!draggedRow) return;
-    const sortContainer = draggedRow.closest('#products-sortable, #products-sortable-mobile');
+    const sortContainer = draggedRow.closest(PRODUCT_SORT_LIST_SELECTOR);
     const nextOrder = readSortIdsFromDom(sortContainer);
     if (!nextOrder.length) return;
     if (dragStartOrder && ordersEqual(nextOrder, dragStartOrder)) return;
@@ -151,18 +318,31 @@ function bindSortableList(root, config) {
   };
 
   root.addEventListener('click', async (e) => {
-    if (productsListLoading) return;
+    if (!useReorderAbort && productsListLoading) return;
 
+    const posInput = e.target.closest('[data-sort-pos]');
+    if (posInput && root.contains(posInput)) return;
+
+    const topBtn = e.target.closest('[data-sort-top]');
+    const bottomBtn = e.target.closest('[data-sort-bottom]');
     const upBtn = e.target.closest('[data-sort-up]');
     const downBtn = e.target.closest('[data-sort-down]');
-    const btn = upBtn || downBtn;
+    const btn = topBtn || bottomBtn || upBtn || downBtn;
     if (!btn || !root.contains(btn)) return;
 
     e.preventDefault();
-    const id = parseInt(upBtn ? upBtn.dataset.sortUp : downBtn.dataset.sortDown, 10);
-    const delta = upBtn ? -1 : 1;
+    const id = parseInt(
+      topBtn?.dataset.sortTop || bottomBtn?.dataset.sortBottom || upBtn?.dataset.sortUp || downBtn?.dataset.sortDown,
+      10
+    );
     const currentOrder = readCurrentSortIds(root);
-    const nextOrder = swapSortIds(currentOrder.length ? currentOrder : getIds(), id, delta);
+    const baseOrder = currentOrder.length ? currentOrder : getIds();
+    let nextOrder = null;
+
+    if (topBtn) nextOrder = moveToPosition(baseOrder, id, 1);
+    else if (bottomBtn) nextOrder = moveToPosition(baseOrder, id, baseOrder.length);
+    else nextOrder = swapSortIds(baseOrder, id, upBtn ? -1 : 1);
+
     if (!nextOrder) return;
 
     if (autoPersist) {
@@ -181,8 +361,29 @@ function bindSortableList(root, config) {
     finishLocalReorder(nextOrder);
   }, { signal });
 
+  root.addEventListener('change', (e) => {
+    const posInput = e.target.closest('[data-sort-pos]');
+    if (!posInput || !root.contains(posInput)) return;
+
+    const id = parseInt(posInput.dataset.sortPos, 10);
+    const position = parseInt(posInput.value, 10);
+    if (!position) return;
+
+    const currentOrder = readCurrentSortIds(root);
+    const nextOrder = moveToPosition(currentOrder.length ? currentOrder : getIds(), id, position);
+    if (!nextOrder) return;
+    finishLocalReorder(nextOrder);
+  }, { signal });
+
+  root.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const posInput = e.target.closest('[data-sort-pos]');
+    if (!posInput || !root.contains(posInput)) return;
+    posInput.blur();
+  }, { signal });
+
   root.addEventListener('dragstart', (e) => {
-    if (productsListLoading) return;
+    if (!useReorderAbort && productsListLoading) return;
     const handle = e.target.closest('[data-sort-handle]');
     if (!handle || !root.contains(handle)) return;
     draggedRow = handle.closest(itemSelector);
@@ -221,11 +422,11 @@ function bindSortableList(root, config) {
   }, { signal });
 
   root.addEventListener('drop', async (e) => {
-    if (productsListLoading || !draggedRow) return;
+    if ((!useReorderAbort && productsListLoading) || !draggedRow) return;
     e.preventDefault();
     root.querySelectorAll(itemSelector).forEach(el => el.classList.remove('sortable-over'));
 
-    const sortContainer = draggedRow.closest('#products-sortable, #products-sortable-mobile');
+    const sortContainer = draggedRow.closest(PRODUCT_SORT_LIST_SELECTOR);
     const nextOrder = readSortIdsFromDom(sortContainer);
     draggedRow = null;
     dragStartOrder = null;
@@ -258,7 +459,7 @@ function productBadges(p) {
   return badges.join(' ');
 }
 
-function renderProductCard(p, sortable, num) {
+function renderProductCard(p, num) {
   const priceLine = p.allow_piece_sale && p.price_piece
     ? `${formatPrice(p.price_pack)} · ${formatPrice(p.price_piece)}/шт`
     : formatPrice(p.price_pack);
@@ -266,9 +467,8 @@ function renderProductCard(p, sortable, num) {
   const categoryLabel = productCategoryNames(p).join(', ') || '—';
 
   return `
-    <article class="admin-card admin-card-compact ${p.deleted ? 'admin-card-muted' : ''}${p.in_stock === false && !p.deleted ? ' admin-card-oos' : ''}"${sortable ? ` data-sort-id="${p.id}"` : ''}>
+    <article class="admin-card admin-card-compact ${p.deleted ? 'admin-card-muted' : ''}${p.in_stock === false && !p.deleted ? ' admin-card-oos' : ''}">
       <div class="admin-card-row">
-        ${sortable ? sortControlsHtml(p.id) : ''}
         <div class="admin-card-main">
           <strong class="admin-card-name">${typeof num === 'number' ? `<span class="admin-row-num">${num}.</span> ` : ''}${escapeHtml(p.name)}</strong>
           <span class="admin-card-meta">${escapeHtml(categoryLabel)} · ${priceLine}</span>
@@ -357,6 +557,39 @@ function isProductListFiltered() {
   return Boolean(productSearchQuery.trim() || productCategoryFilter);
 }
 
+function syncAdminProductsSections(activeCount, shownCount) {
+  const addSection = document.getElementById('add-product-section');
+  const listSection = document.getElementById('products-list-section');
+  const listSummary = document.getElementById('products-list-summary');
+
+  if (listSummary) {
+    listSummary.textContent = shownCount === activeCount
+      ? `Список товаров (${activeCount})`
+      : `Список товаров (${shownCount} из ${activeCount})`;
+  }
+
+  if (activeCount <= ADMIN_PRODUCTS_COLLAPSE_THRESHOLD) {
+    if (addSection) addSection.open = true;
+    if (listSection) listSection.open = true;
+    return;
+  }
+
+  if (listSection && listSection.dataset.userOpened !== '1') {
+    listSection.open = true;
+  }
+  if (addSection && addSection.dataset.userOpened !== '1') {
+    addSection.open = false;
+  }
+}
+
+function bindAdminCollapsibleMemory(section) {
+  if (!section || section.dataset.bound === '1') return;
+  section.dataset.bound = '1';
+  section.addEventListener('toggle', () => {
+    if (section.open) section.dataset.userOpened = '1';
+  });
+}
+
 function bindProductActions(container, products) {
   container.querySelectorAll('[data-delete]').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -406,21 +639,11 @@ async function loadProductsList() {
     return;
   }
 
-  container.innerHTML = `
-    ${canSortProducts ? `
-      <div class="admin-sort-toolbar">
-        <p class="admin-section-hint">Порядок в каталоге: перетащите ⋮⋮ или нажмите ↑↓, затем «Сохранить порядок»</p>
-        <div class="admin-sort-toolbar-actions">
-          <button type="button" class="btn btn-primary btn-sm" id="save-product-order">Сохранить порядок</button>
-          <button type="button" class="btn btn-outline btn-sm" id="cancel-product-order" disabled>Отменить</button>
-        </div>
-      </div>` : ''}
-    ${isProductListFiltered() ? '<p class="admin-section-hint">Показаны отфильтрованные товары. Сортировка каталога доступна без фильтров.</p>' : ''}
-    <div class="admin-desktop-only">
+  const productsListHtml = `
+    <div class="admin-desktop-only admin-table-wrap">
       <table class="data-table data-table-compact">
         <thead>
           <tr>
-            <th></th>
             <th>№</th>
             <th>Название</th>
             <th>Категория</th>
@@ -429,14 +652,13 @@ async function loadProductsList() {
             <th></th>
           </tr>
         </thead>
-        <tbody id="products-sortable">
+        <tbody id="products-table-body">
           ${products.map((p, index) => {
             const num = canSortProducts && !p.deleted
               ? activeProducts.findIndex(x => x.id === p.id) + 1
               : index + 1;
             return `
-            <tr style="${p.deleted ? 'opacity:0.5' : ''}"${canSortProducts && !p.deleted ? ` data-sort-id="${p.id}"` : ''}>
-              <td>${canSortProducts && !p.deleted ? sortControlsHtml(p.id) : ''}</td>
+            <tr style="${p.deleted ? 'opacity:0.5' : ''}">
               <td class="admin-row-num">${num}</td>
               <td>${escapeHtml(p.name)}</td>
               <td>${escapeHtml(productCategoryNames(p).join(', ') || '—')}</td>
@@ -453,32 +675,37 @@ async function loadProductsList() {
         </tbody>
       </table>
     </div>
-    <div class="admin-mobile-only admin-cards admin-cards-compact" id="products-sortable-mobile">
+    <div class="admin-mobile-only admin-cards admin-cards-compact" id="products-cards">
       ${products.map((p, index) => renderProductCard(
         p,
-        canSortProducts && !p.deleted,
         canSortProducts && !p.deleted
           ? activeProducts.findIndex(x => x.id === p.id) + 1
           : index + 1
       )).join('')}
     </div>`;
 
-  bindProductActions(container, allProducts);
-
-  if (canSortProducts) {
-    setProductSortDirty(false);
-    bindSortableList(container, {
-      itemSelector: '[data-sort-id]',
-      getIds: () => productSortIds,
-      setIds: (ids) => { productSortIds = ids; },
-      reorderUrl: '/api/admin/products/reorder',
-      onReload: loadProductsList,
-      autoPersist: false,
-      onOrderChange: () => setProductSortDirty(true),
-    });
-  } else {
-    productSortDirty = false;
+  const reorderBar = document.getElementById('products-reorder-bar');
+  if (reorderBar) {
+    if (canSortProducts) {
+      reorderBar.hidden = false;
+      reorderBar.innerHTML = `
+        <div class="admin-sort-toolbar">
+          <p class="admin-section-hint">Порядок в каталоге на сайте</p>
+          <button type="button" class="btn btn-primary btn-sm" id="open-product-reorder">Изменить порядок</button>
+        </div>`;
+    } else {
+      reorderBar.hidden = true;
+      reorderBar.innerHTML = '';
+    }
   }
+
+  container.innerHTML = `
+    ${isProductListFiltered() ? '<p class="admin-section-hint">Показаны отфильтрованные товары. Сортировка каталога доступна без фильтров.</p>' : ''}
+    ${productsListHtml}`;
+
+  productReorderSource = activeProducts;
+  syncAdminProductsSections(activeProducts.length, products.length);
+  bindProductActions(container, allProducts);
   } finally {
     productsListLoading = false;
   }
@@ -535,15 +762,22 @@ async function loadProductsList() {
   setupProductFilters();
   await loadProductCategoryOptions();
 
-  document.getElementById('products-list')?.addEventListener('click', (e) => {
-    if (e.target.closest('#save-product-order')) {
+  bindAdminCollapsibleMemory(document.getElementById('add-product-section'));
+  bindAdminCollapsibleMemory(document.getElementById('products-list-section'));
+
+  document.getElementById('products-reorder-bar')?.addEventListener('click', (e) => {
+    if (e.target.closest('#open-product-reorder')) {
       e.preventDefault();
-      saveProductSortOrder();
+      openProductReorderModal(productReorderSource);
     }
-    if (e.target.closest('#cancel-product-order')) {
-      e.preventDefault();
-      cancelProductSortOrder();
-    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const host = document.getElementById('product-reorder-modal');
+    if (!host || host.style.display === 'none') return;
+    if (productReorderModalDirty && !confirm('Закрыть без сохранения?')) return;
+    closeProductReorderModal();
   });
 
   loadProductsList();
