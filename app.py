@@ -1151,7 +1151,7 @@ def list_products():
         like = f'%{q}%'
         params.extend([like, like])
 
-    sql += ' ORDER BY sort_order ASC, id ASC'
+    sql += ' ORDER BY is_bestseller DESC, sort_order ASC, id ASC'
     rows = conn.execute(sql, params).fetchall()
     result = [map_product(conn, r) for r in rows]
     conn.close()

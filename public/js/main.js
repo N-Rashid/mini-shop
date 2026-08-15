@@ -207,6 +207,10 @@ function sortProducts(list) {
     const bOut = b.in_stock === false ? 1 : 0;
     if (aOut !== bOut) return aOut - bOut;
 
+    const aHit = a.is_bestseller ? 0 : 1;
+    const bHit = b.is_bestseller ? 0 : 1;
+    if (aHit !== bHit) return aHit - bHit;
+
     if (productSort === 'date_desc') {
       return productCreatedTime(b) - productCreatedTime(a) || a.id - b.id;
     }
