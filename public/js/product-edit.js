@@ -40,8 +40,8 @@ async function openProductEditModal(productId, products, onSaved) {
           <input name="name" value="${escapeHtml(p.name)}" required>
         </div>
         <div class="form-group">
-          <label>Категории</label>
-          <p class="form-hint">Можно выбрать несколько</p>
+          <label>Категории *</label>
+          <p class="form-hint">Выберите хотя бы одну</p>
           ${renderCategoryPicker(activeCats, productCategoryIds(p))}
         </div>
         <div class="form-row">
@@ -184,6 +184,10 @@ async function openProductEditModal(productId, products, onSaved) {
     const btnText = submitBtn?.textContent;
     const fd = new FormData(form);
     const categoryIds = getSelectedCategoryIds(form);
+    if (!categoryIds.length) {
+      alert('Выберите хотя бы одну категорию');
+      return;
+    }
 
     try {
       if (submitBtn) {

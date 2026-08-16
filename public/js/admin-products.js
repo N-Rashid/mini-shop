@@ -810,6 +810,11 @@ async function loadProductsList() {
     const formData = new FormData(form);
     const btnText = submitBtn?.textContent;
 
+    if (!getSelectedCategoryIds(form).length) {
+      showAlert(alertArea, 'Выберите хотя бы одну категорию', 'error');
+      return;
+    }
+
     try {
       if (submitBtn) {
         submitBtn.disabled = true;

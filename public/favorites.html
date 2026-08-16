@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#e84393">
+  <title>Избранное — Мороженое Избербаш</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header data-site-header data-nav="favorites"></header>
+
+  <main class="container">
+    <h1 class="page-title">Избранное</h1>
+    <p class="page-subtitle">Товары, которые вы сохранили. Добавлять в избранное могут только авторизованные клиенты.</p>
+    <div id="alert-area"></div>
+    <div id="products" class="products-grid">
+      <p style="color:var(--muted);grid-column:1/-1;text-align:center">Загрузка...</p>
+    </div>
+  </main>
+
+  <footer class="site-footer" data-site-footer></footer>
+
+  <script src="/js/common.js"></script>
+  <script src="/js/favorites.js"></script>
+</body>
+</html>

@@ -49,7 +49,8 @@
           method: 'POST',
           body: JSON.stringify({ login, password, remember }),
         });
-        location.href = '/account.html';
+        const next = new URLSearchParams(location.search).get('next') || '/account.html';
+        location.href = next;
       } catch (err) {
         showAlert(alertArea, err.message, 'error');
       }

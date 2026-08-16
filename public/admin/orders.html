@@ -142,6 +142,10 @@
 
       setupOrderFilters();
       loadOrders();
+
+      window.addEventListener('admin:new-order', () => {
+        if (orderFilter === 'all' || orderFilter === 'pending') loadOrders();
+      });
     })();
   </script>
 </body>

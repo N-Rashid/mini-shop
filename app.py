@@ -312,6 +312,15 @@ def migrate_db(conn):
         mark_migration(conn, 'product_categories_sort_order_init')
 
     conn.executescript('''
+        CREATE TABLE IF NOT EXISTS favorites (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, product_id)
+        );
+    ''')
+
+    conn.executescript('''
         CREATE TABLE IF NOT EXISTS site_settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL DEFAULT ''
@@ -834,6 +843,17 @@ def require_auth(f):
     return wrapper
 
 
+def require_client(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if clear_expired_session() or not session.get('user_id'):
+            return jsonify({'error': 'Необходима авторизация'}), 401
+        if session.get('is_admin'):
+            return jsonify({'error': 'Избранное доступно только клиентам'}), 403
+        return f(*args, **kwargs)
+    return wrapper
+
+
 def require_admin(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -1001,6 +1021,82 @@ def auth_me():
 
     session.permanent = True
     return jsonify(row_to_dict(user))
+
+
+# --- Favorites (clients only) ---
+
+@app.get('/api/favorites/ids')
+@require_client
+def favorite_ids():
+    conn = get_db()
+    rows = conn.execute(
+        '''
+        SELECT f.product_id
+        FROM favorites f
+        JOIN products p ON p.id = f.product_id
+        WHERE f.user_id = ? AND p.deleted_at IS NULL
+        ORDER BY f.created_at DESC
+        ''',
+        (session['user_id'],),
+    ).fetchall()
+    conn.close()
+    return jsonify({'ids': [row['product_id'] for row in rows]})
+
+
+@app.get('/api/favorites')
+@require_client
+def list_favorites():
+    conn = get_db()
+    rows = conn.execute(
+        f'''
+        SELECT {PRODUCT_SELECT_QUALIFIED}
+        FROM favorites f
+        JOIN products ON products.id = f.product_id
+        WHERE f.user_id = ? AND products.deleted_at IS NULL
+        ORDER BY f.created_at DESC
+        ''',
+        (session['user_id'],),
+    ).fetchall()
+    result = [map_product(conn, r) for r in rows]
+    conn.close()
+    return jsonify(result)
+
+
+@app.post('/api/favorites/<int:product_id>')
+@require_client
+def add_favorite(product_id):
+    conn = get_db()
+    product = conn.execute(
+        'SELECT id FROM products WHERE id = ? AND deleted_at IS NULL',
+        (product_id,),
+    ).fetchone()
+    if not product:
+        conn.close()
+        return jsonify({'error': 'Товар не найден'}), 404
+
+    conn.execute(
+        '''
+        INSERT OR IGNORE INTO favorites (user_id, product_id, created_at)
+        VALUES (?, ?, ?)
+        ''',
+        (session['user_id'], product_id, now_iso()),
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
+@app.delete('/api/favorites/<int:product_id>')
+@require_client
+def remove_favorite(product_id):
+    conn = get_db()
+    conn.execute(
+        'DELETE FROM favorites WHERE user_id = ? AND product_id = ?',
+        (session['user_id'], product_id),
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
 
 
 # --- Admin auth ---
@@ -1456,6 +1552,9 @@ def admin_create_product():
         return jsonify({'error': 'Название и цена за упаковку обязательны'}), 400
 
     category_ids = parse_category_ids_from_form()
+    if not category_ids:
+        return jsonify({'error': 'Выберите хотя бы одну категорию'}), 400
+
     allow_piece = 1 if request.form.get('allow_piece_sale') in ('1', 'true', 'on') else 0
     is_on_sale = 1 if request.form.get('is_on_sale') in ('1', 'true', 'on') else 0
     is_bestseller = 1 if request.form.get('is_bestseller') in ('1', 'true', 'on') else 0
@@ -1613,6 +1712,10 @@ def admin_update_product(product_id):
         return jsonify({'error': 'Товар не найден'}), 404
 
     category_ids = parse_category_ids_from_data(data)
+    if not category_ids:
+        conn.close()
+        return jsonify({'error': 'Выберите хотя бы одну категорию'}), 400
+
     is_on_sale = 1 if data.get('is_on_sale') else 0
     is_bestseller = 1 if data.get('is_bestseller') else 0
     in_stock = 1 if data.get('in_stock', True) else 0
@@ -1860,6 +1963,30 @@ def admin_restore_user(user_id):
 
 
 # --- Admin orders ---
+
+@app.get('/api/admin/orders/pending-summary')
+@require_admin
+def admin_pending_orders_summary():
+    conn = get_db()
+    rows = conn.execute('''
+        SELECT o.id, o.client_number, o.total, o.created_at, u.name AS user_name
+        FROM orders o
+        JOIN users u ON u.id = o.user_id
+        WHERE o.deleted_at IS NULL
+          AND o.archived_at IS NULL
+          AND o.status = 'pending'
+        ORDER BY o.created_at DESC
+    ''').fetchall()
+    conn.close()
+    orders = [{
+        'id': r['id'],
+        'number': r['client_number'] if r['client_number'] is not None else r['id'],
+        'user_name': r['user_name'],
+        'total': r['total'],
+        'created_at': r['created_at'],
+    } for r in rows]
+    return jsonify({'count': len(orders), 'orders': orders})
+
 
 @app.get('/api/admin/orders')
 @require_admin
