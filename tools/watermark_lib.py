@@ -10,7 +10,7 @@ except ImportError:
 
 DIAGONAL_TEXT = 'Мороженое Избербаш '
 JPEG_QUALITY = 85
-DEFAULT_LOGO = Path(__file__).resolve().parents[1] / 'Demo' / 'watermark.png'
+DEFAULT_LOGO = Path(__file__).resolve().parents[1] / 'demo' / 'watermark.png'
 
 
 def load_font(size: int):

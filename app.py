@@ -40,8 +40,9 @@ try:
 except ImportError:
     pass
 
-WATERMARK_LOGO_PATH = os.path.join(BASE_DIR, 'Demo', 'watermark.png')
+WATERMARK_LOGO_PATH = os.path.join(BASE_DIR, 'demo', 'watermark.png')
 _watermark_logo_cache = False
+_watermark_status_logged = False
 ARCHIVE_ORDERS_AFTER_MONTHS = 5
 PURGE_ARCHIVED_AFTER_MONTHS = 1
 PURGE_DELETED_USERS_AFTER_DAYS = 7
@@ -897,16 +898,32 @@ def prepare_product_image(img):
     return img
 
 
+def log_watermark_status_once():
+    global _watermark_status_logged
+    if _watermark_status_logged:
+        return
+    _watermark_status_logged = True
+    if not apply_product_watermark or not Image:
+        app.logger.warning('Watermark disabled: Pillow or watermark_lib unavailable')
+        return
+    if not os.path.isfile(WATERMARK_LOGO_PATH):
+        app.logger.warning('Watermark disabled: logo not found at %s', WATERMARK_LOGO_PATH)
+        return
+    app.logger.info('Watermark enabled: %s', WATERMARK_LOGO_PATH)
+
+
 def get_watermark_logo():
     global _watermark_logo_cache
     if _watermark_logo_cache is not False:
         return _watermark_logo_cache
+    log_watermark_status_once()
     if not load_watermark_logo or not os.path.isfile(WATERMARK_LOGO_PATH):
         _watermark_logo_cache = None
         return None
     try:
         _watermark_logo_cache = load_watermark_logo(WATERMARK_LOGO_PATH)
-    except Exception:
+    except Exception as exc:
+        app.logger.warning('Watermark logo load failed: %s', exc)
         _watermark_logo_cache = None
     return _watermark_logo_cache
 
@@ -919,7 +936,8 @@ def maybe_watermark_product_image(img):
         return img
     try:
         return apply_product_watermark(img, logo)
-    except Exception:
+    except Exception as exc:
+        app.logger.warning('Watermark apply failed: %s', exc)
         return img
 
 
