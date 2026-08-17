@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import sys
 import uuid
 from datetime import datetime, timezone, timedelta
 from functools import wraps
@@ -27,6 +28,20 @@ try:
     from PIL import Image
 except ImportError:
     pass
+
+TOOLS_DIR = os.path.join(BASE_DIR, 'tools')
+if TOOLS_DIR not in sys.path:
+    sys.path.insert(0, TOOLS_DIR)
+
+apply_product_watermark = None
+load_watermark_logo = None
+try:
+    from watermark_lib import apply_product_watermark, load_logo_image as load_watermark_logo
+except ImportError:
+    pass
+
+WATERMARK_LOGO_PATH = os.path.join(BASE_DIR, 'Demo', 'watermark.png')
+_watermark_logo_cache = False
 ARCHIVE_ORDERS_AFTER_MONTHS = 5
 PURGE_ARCHIVED_AFTER_MONTHS = 1
 PURGE_DELETED_USERS_AFTER_DAYS = 7
@@ -882,10 +897,37 @@ def prepare_product_image(img):
     return img
 
 
+def get_watermark_logo():
+    global _watermark_logo_cache
+    if _watermark_logo_cache is not False:
+        return _watermark_logo_cache
+    if not load_watermark_logo or not os.path.isfile(WATERMARK_LOGO_PATH):
+        _watermark_logo_cache = None
+        return None
+    try:
+        _watermark_logo_cache = load_watermark_logo(WATERMARK_LOGO_PATH)
+    except Exception:
+        _watermark_logo_cache = None
+    return _watermark_logo_cache
+
+
+def maybe_watermark_product_image(img):
+    if not apply_product_watermark or not Image:
+        return img
+    logo = get_watermark_logo()
+    if logo is None:
+        return img
+    try:
+        return apply_product_watermark(img, logo)
+    except Exception:
+        return img
+
+
 def save_prepared_jpg(img, product_id):
     unique_name = f'{product_id}-{uuid.uuid4().hex[:12]}.jpg'
     path = os.path.join(UPLOADS_DIR, unique_name)
-    prepare_product_image(img).save(path, 'JPEG', quality=PRODUCT_IMAGE_JPEG_QUALITY)
+    prepared = maybe_watermark_product_image(prepare_product_image(img))
+    prepared.save(path, 'JPEG', quality=PRODUCT_IMAGE_JPEG_QUALITY)
     return unique_name
 
 
