@@ -376,6 +376,49 @@ function initSearchClear(input) {
   return input;
 }
 
+function initPasswordToggle(input) {
+  if (!input || input.type !== 'password' || input.closest('.password-input-wrap')) return input;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'password-input-wrap';
+  input.parentNode.insertBefore(wrap, input);
+  wrap.appendChild(input);
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'password-toggle-btn';
+  btn.setAttribute('aria-label', 'Показать пароль');
+  btn.setAttribute('aria-pressed', 'false');
+  btn.innerHTML = `
+    <svg class="password-toggle-icon password-toggle-icon--show" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"></path>
+      <circle cx="12" cy="12" r="3"></circle>
+    </svg>
+    <svg class="password-toggle-icon password-toggle-icon--hide" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a20.3 20.3 0 0 1 5.06-5.94"></path>
+      <path d="M9.9 4.24A10.94 10.94 0 0 1 12 5c7 0 11 7 11 7a20.3 20.3 0 0 1-3.16 4.19"></path>
+      <path d="M1 1l22 22"></path>
+      <path d="M14.12 14.12A3 3 0 0 1 9.88 9.88"></path>
+    </svg>
+  `;
+
+  btn.addEventListener('click', () => {
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    btn.classList.toggle('is-visible', show);
+    btn.setAttribute('aria-label', show ? 'Скрыть пароль' : 'Показать пароль');
+    btn.setAttribute('aria-pressed', show ? 'true' : 'false');
+    input.focus();
+  });
+
+  wrap.appendChild(btn);
+  return input;
+}
+
+function initAllPasswordToggles(root = document) {
+  root.querySelectorAll('input[type="password"]').forEach(initPasswordToggle);
+}
+
 function isProductInStock(product) {
   return product?.in_stock !== false;
 }
@@ -1349,6 +1392,7 @@ function bootSiteChrome() {
   initStaticModalScrollLocks();
   initMiniCartBar();
   initScrollToTop();
+  initAllPasswordToggles();
   Cart.updateBadge();
   updateMiniCartBar();
   loadUserInfo();
