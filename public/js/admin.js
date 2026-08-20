@@ -17,7 +17,7 @@ async function adminLogout() {
 
 function adminSidebar(active) {
   return `
-    <aside class="admin-sidebar">
+    <aside class="admin-sidebar admin-desktop-only">
       <h3>Админ</h3>
       <a href="/admin/dashboard.html" ${active === 'dashboard' ? 'class="active"' : ''}>Обзор</a>
       <a href="/admin/products.html" ${active === 'products' ? 'class="active"' : ''}>Товары</a>
@@ -29,6 +29,101 @@ function adminSidebar(active) {
       <a href="#" id="admin-logout">Выйти</a>
       <a href="/">На сайт</a>
     </aside>`;
+}
+
+const ADMIN_MOBILE_NAV_MAIN = [
+  { id: 'dashboard', href: '/admin/dashboard.html', label: 'Обзор' },
+  { id: 'products', href: '/admin/products.html', label: 'Товары' },
+  { id: 'orders', href: '/admin/orders.html', label: 'Заказы' },
+];
+
+const ADMIN_MOBILE_NAV_MORE = [
+  { id: 'categories', href: '/admin/categories.html', label: 'Категории' },
+  { id: 'users', href: '/admin/users.html', label: 'Клиенты' },
+  { id: 'content', href: '/admin/content.html', label: 'Контент' },
+  { href: '/', label: 'На сайт' },
+  { action: 'logout', label: 'Выйти' },
+];
+
+function getAdminActivePage() {
+  const path = location.pathname.toLowerCase();
+  if (path.includes('/admin/dashboard')) return 'dashboard';
+  if (path.includes('/admin/products')) return 'products';
+  if (path.includes('/admin/categories')) return 'categories';
+  if (path.includes('/admin/users') || path.includes('/admin/user.html')) return 'users';
+  if (path.includes('/admin/orders')) return 'orders';
+  if (path.includes('/admin/content')) return 'content';
+  return '';
+}
+
+function setAdminMobileMoreOpen(open) {
+  const sheet = document.getElementById('admin-mobile-more-sheet');
+  const toggle = document.getElementById('admin-mobile-more-toggle');
+  if (!sheet || !toggle) return;
+
+  sheet.hidden = !open;
+  toggle.classList.toggle('is-open', open);
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) lockPageScroll();
+  else unlockPageScroll();
+}
+
+function mountAdminMobileNav(active) {
+  if (!document.body.classList.contains('admin-page')) return;
+  if (document.getElementById('admin-mobile-nav')) return;
+
+  const moreActive = ADMIN_MOBILE_NAV_MORE.some(item => item.id === active);
+  const nav = document.createElement('nav');
+  nav.id = 'admin-mobile-nav';
+  nav.className = 'admin-mobile-nav';
+  nav.setAttribute('aria-label', 'Навигация админки');
+  nav.innerHTML = `
+    ${ADMIN_MOBILE_NAV_MAIN.map(item => `
+      <a href="${item.href}" class="admin-mobile-nav-item${item.id === active ? ' is-active' : ''}">
+        <span class="admin-mobile-nav-label">${item.label}</span>
+      </a>`).join('')}
+    <button type="button" class="admin-mobile-nav-item${moreActive ? ' is-active' : ''}" id="admin-mobile-more-toggle" aria-expanded="false" aria-haspopup="true">
+      <span class="admin-mobile-nav-label">Ещё</span>
+    </button>`;
+
+  const sheet = document.createElement('div');
+  sheet.id = 'admin-mobile-more-sheet';
+  sheet.className = 'admin-mobile-more-sheet';
+  sheet.hidden = true;
+  sheet.innerHTML = `
+    <div class="admin-mobile-more-backdrop" data-close-admin-more></div>
+    <div class="admin-mobile-more-panel" role="menu">
+      <div class="admin-mobile-more-head">
+        <strong>Меню</strong>
+        <button type="button" class="admin-mobile-more-close" data-close-admin-more aria-label="Закрыть">×</button>
+      </div>
+      ${ADMIN_MOBILE_NAV_MORE.map(item => {
+        if (item.action === 'logout') {
+          return `<button type="button" class="admin-mobile-more-link" data-admin-logout-mobile>${item.label}</button>`;
+        }
+        const isActive = item.id === active ? ' is-active' : '';
+        return `<a href="${item.href}" class="admin-mobile-more-link${isActive}">${item.label}</a>`;
+      }).join('')}
+    </div>`;
+
+  document.body.appendChild(nav);
+  document.body.appendChild(sheet);
+
+  nav.querySelector('#admin-mobile-more-toggle')?.addEventListener('click', () => {
+    setAdminMobileMoreOpen(sheet.hidden);
+  });
+  sheet.querySelectorAll('[data-close-admin-more]').forEach(el => {
+    el.addEventListener('click', () => setAdminMobileMoreOpen(false));
+  });
+  sheet.querySelector('[data-admin-logout-mobile]')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    setAdminMobileMoreOpen(false);
+    adminLogout();
+  });
+}
+
+function initAdminMobileChrome() {
+  mountAdminMobileNav(getAdminActivePage());
 }
 
 function escapeHtml(str) {
@@ -182,20 +277,21 @@ function stopAdminTitleFlash() {
 }
 
 function updateOrdersNavBadge(count) {
-  const link = document.querySelector('.admin-sidebar a[href="/admin/orders.html"]');
-  if (!link) return;
-  let badge = link.querySelector('.admin-nav-badge');
-  if (count > 0) {
-    if (!badge) {
-      badge = document.createElement('span');
-      badge.className = 'admin-nav-badge';
-      link.appendChild(document.createTextNode(' '));
-      link.appendChild(badge);
+  document.querySelectorAll(
+    '.admin-sidebar a[href="/admin/orders.html"], .admin-mobile-nav-item[href="/admin/orders.html"]'
+  ).forEach(link => {
+    let badge = link.querySelector('.admin-nav-badge');
+    if (count > 0) {
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'admin-nav-badge';
+        link.appendChild(badge);
+      }
+      badge.textContent = count;
+    } else if (badge) {
+      badge.remove();
     }
-    badge.textContent = count;
-  } else if (badge) {
-    badge.remove();
-  }
+  });
 }
 
 function showAdminOrderToast(orders) {
@@ -283,6 +379,7 @@ function stopAdminOrderAlerts() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  initAdminMobileChrome();
   document.getElementById('admin-logout')?.addEventListener('click', (e) => {
     e.preventDefault();
     adminLogout();

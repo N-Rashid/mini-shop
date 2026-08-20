@@ -20,18 +20,18 @@
       <div id="sidebar"></div>
       <div class="admin-content">
         <h1>Обзор</h1>
-        <div id="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px">
-          <div style="background:var(--bg);padding:20px;border-radius:var(--radius)">
-            <div style="font-size:2rem;font-weight:700" id="stat-products">—</div>
-            <div style="color:var(--muted)">Товаров</div>
+        <div id="stats" class="admin-stats-grid">
+          <div class="admin-stat-card">
+            <div class="admin-stat-value" id="stat-products">—</div>
+            <div class="admin-stat-label">Товаров</div>
           </div>
-          <div style="background:var(--bg);padding:20px;border-radius:var(--radius)">
-            <div style="font-size:2rem;font-weight:700" id="stat-users">—</div>
-            <div style="color:var(--muted)">Клиентов</div>
+          <div class="admin-stat-card">
+            <div class="admin-stat-value" id="stat-users">—</div>
+            <div class="admin-stat-label">Клиентов</div>
           </div>
-          <div style="background:var(--bg);padding:20px;border-radius:var(--radius)">
-            <div style="font-size:2rem;font-weight:700" id="stat-orders">—</div>
-            <div style="color:var(--muted)">Заказов</div>
+          <div class="admin-stat-card">
+            <div class="admin-stat-value" id="stat-orders">—</div>
+            <div class="admin-stat-label">Заказов</div>
           </div>
         </div>
       </div>

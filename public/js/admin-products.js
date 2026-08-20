@@ -794,6 +794,10 @@ async function loadProductsList() {
   const admin = await requireAdmin();
   if (!admin) return;
 
+  if (window.matchMedia('(max-width: 768px)').matches) {
+    document.getElementById('add-product-section')?.removeAttribute('open');
+  }
+
   document.getElementById('admin-name').textContent = admin.name;
   document.getElementById('sidebar').innerHTML = adminSidebar('products');
 
