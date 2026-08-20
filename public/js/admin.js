@@ -143,6 +143,8 @@ function adminCollapsibleHtml(contentHtml, count, label, threshold = 10) {
 
 const ADMIN_ORDER_POLL_MS = 15000;
 const ADMIN_ORDER_SOUND_URL = '/sounds/new-order.wav';
+const ADMIN_SOUND_ACTIVATED_KEY = 'adminOrderSoundActivated';
+const ADMIN_SOUND_PROMPT_DISMISSED_KEY = 'adminOrderSoundPromptDismissed';
 let adminOrderPollTimer = null;
 let knownPendingOrderIds = null;
 let adminTitleFlashTimer = null;
@@ -151,9 +153,28 @@ let adminNotificationsRequested = false;
 let adminOrderAudio = null;
 let adminAudioUnlocked = false;
 let adminSoundPromptEl = null;
+let adminSoundHintEl = null;
 
 function isAdminOrderSoundEnabled() {
   return localStorage.getItem('adminOrderSound') !== '0';
+}
+
+function isAdminSoundPromptDismissed() {
+  return localStorage.getItem(ADMIN_SOUND_PROMPT_DISMISSED_KEY) === '1';
+}
+
+function hasAdminSoundActivatedBefore() {
+  return localStorage.getItem(ADMIN_SOUND_ACTIVATED_KEY) === '1';
+}
+
+function markAdminSoundActivated() {
+  localStorage.setItem(ADMIN_SOUND_ACTIVATED_KEY, '1');
+}
+
+function dismissAdminSoundPromptPermanent() {
+  localStorage.setItem(ADMIN_SOUND_PROMPT_DISMISSED_KEY, '1');
+  hideAdminSoundPrompt();
+  hideAdminSoundHint();
 }
 
 function ensureAdminOrderAudio() {
@@ -161,6 +182,15 @@ function ensureAdminOrderAudio() {
   adminOrderAudio = new Audio(ADMIN_ORDER_SOUND_URL);
   adminOrderAudio.preload = 'auto';
   return adminOrderAudio;
+}
+
+function hideAdminSoundHint() {
+  if (!adminSoundHintEl) return;
+  adminSoundHintEl.classList.remove('is-visible');
+  window.setTimeout(() => {
+    adminSoundHintEl?.remove();
+    adminSoundHintEl = null;
+  }, 300);
 }
 
 function hideAdminSoundPrompt() {
@@ -172,15 +202,39 @@ function hideAdminSoundPrompt() {
   }, 300);
 }
 
+function showAdminSoundSessionHint() {
+  if (sessionStorage.getItem('adminSoundHintShown') === '1') return;
+  if (!isAdminOrderSoundEnabled() || adminAudioUnlocked || adminSoundHintEl) return;
+
+  sessionStorage.setItem('adminSoundHintShown', '1');
+  adminSoundHintEl = document.createElement('div');
+  adminSoundHintEl.className = 'admin-sound-hint';
+  adminSoundHintEl.textContent = 'Коснитесь экрана — включится звук о новых заказах';
+  document.body.appendChild(adminSoundHintEl);
+  window.requestAnimationFrame(() => adminSoundHintEl.classList.add('is-visible'));
+
+  const hide = () => hideAdminSoundHint();
+  adminSoundHintEl.addEventListener('click', hide);
+  window.setTimeout(hide, 6000);
+}
+
 function showAdminSoundPrompt() {
   if (adminAudioUnlocked || !isAdminOrderSoundEnabled() || adminSoundPromptEl) return;
+  if (isAdminSoundPromptDismissed() || hasAdminSoundActivatedBefore()) return;
+
   adminSoundPromptEl = document.createElement('div');
   adminSoundPromptEl.className = 'admin-sound-prompt';
   adminSoundPromptEl.innerHTML = `
-    <span>🔊 Нажмите, чтобы включить звук при новых заказах</span>
-    <button type="button" class="btn btn-primary btn-sm" data-enable-sound>Включить звук</button>`;
+    <span>Нажмите, чтобы включить звук при новых заказах</span>
+    <div class="admin-sound-prompt-actions">
+      <button type="button" class="btn btn-primary btn-sm" data-enable-sound>Включить звук</button>
+      <button type="button" class="btn btn-outline btn-sm" data-dismiss-sound>Не сейчас</button>
+    </div>`;
   adminSoundPromptEl.querySelector('[data-enable-sound]').addEventListener('click', () => {
     unlockAdminAudio(true);
+  });
+  adminSoundPromptEl.querySelector('[data-dismiss-sound]').addEventListener('click', () => {
+    dismissAdminSoundPromptPermanent();
   });
   document.body.appendChild(adminSoundPromptEl);
   window.requestAnimationFrame(() => adminSoundPromptEl.classList.add('is-visible'));
@@ -202,7 +256,9 @@ async function unlockAdminAudio(playTest = false) {
     }
     adminOrderAudio.volume = 1;
     adminAudioUnlocked = true;
+    markAdminSoundActivated();
     hideAdminSoundPrompt();
+    hideAdminSoundHint();
     if (playTest) {
       adminOrderAudio.currentTime = 0;
       await adminOrderAudio.play();
@@ -225,7 +281,9 @@ function playNewOrderSound() {
   if (playPromise) {
     playPromise.catch(() => {
       adminAudioUnlocked = false;
-      showAdminSoundPrompt();
+      if (!isAdminSoundPromptDismissed() && !hasAdminSoundActivatedBefore()) {
+        showAdminSoundPrompt();
+      }
     });
   }
 }
@@ -366,7 +424,9 @@ function startAdminOrderAlerts() {
   knownPendingOrderIds = null;
   pollAdminPendingOrders();
   adminOrderPollTimer = window.setInterval(pollAdminPendingOrders, ADMIN_ORDER_POLL_MS);
-  window.setTimeout(showAdminSoundPrompt, 500);
+  if (!hasAdminSoundActivatedBefore() && !isAdminSoundPromptDismissed()) {
+    window.setTimeout(showAdminSoundSessionHint, 800);
+  }
 }
 
 function stopAdminOrderAlerts() {
@@ -392,7 +452,11 @@ document.addEventListener('visibilitychange', () => {
 
 function onAdminUserGesture() {
   requestAdminNotifications();
-  if (!adminAudioUnlocked) unlockAdminAudio(false);
+  if (!adminAudioUnlocked && isAdminOrderSoundEnabled()) {
+    unlockAdminAudio(false).then((ok) => {
+      if (ok) hideAdminSoundHint();
+    });
+  }
 }
 
 document.addEventListener('click', onAdminUserGesture);
