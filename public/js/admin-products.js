@@ -28,6 +28,20 @@ function sortControlsCompactHtml(id, num, total) {
     </div>`;
 }
 
+function sortControlsMobileHtml(id, num, total) {
+  return `
+    <div class="admin-sort-controls admin-sort-controls-mobile">
+      <label class="admin-sort-pos-label" for="sort-pos-${id}">Место</label>
+      <input type="number" id="sort-pos-${id}" class="admin-sort-pos-input admin-sort-pos-input-mobile" min="1" max="${total}" value="${num}" data-sort-pos="${id}" inputmode="numeric" aria-label="Номер места в списке">
+      <button type="button" class="admin-sort-btn" data-sort-up="${id}" aria-label="Выше">↑</button>
+      <button type="button" class="admin-sort-btn" data-sort-down="${id}" aria-label="Ниже">↓</button>
+    </div>`;
+}
+
+function isAdminMobileView() {
+  return window.matchMedia('(max-width: 768px)').matches;
+}
+
 async function persistSortOrder(url, ids, categoryId = null) {
   const body = { order: ids };
   if (categoryId) body.category_id = categoryId;
@@ -116,6 +130,9 @@ function updateSortRowNumbers(el, num, total) {
   el.querySelectorAll('.admin-row-num').forEach(cell => {
     cell.textContent = cell.closest('.admin-card-name') ? `${num}.` : String(num);
   });
+  el.querySelectorAll('.product-reorder-num').forEach(cell => {
+    cell.textContent = String(num);
+  });
   el.querySelectorAll('.admin-sort-pos-input').forEach(input => {
     input.value = num;
     input.max = total;
@@ -176,10 +193,22 @@ function renderProductReorderRows(root, productsById, order, query = '') {
   if (!list) return;
 
   const q = query.trim().toLowerCase();
+  const mobile = isAdminMobileView();
+  list.classList.toggle('product-reorder-list--mobile', mobile);
   list.innerHTML = order.map((id, index) => {
     const product = productsById.get(id);
     if (!product) return '';
     const hidden = q && !(product.name || '').toLowerCase().includes(q);
+    if (mobile) {
+      return `
+      <div class="product-reorder-row product-reorder-row--mobile"${hidden ? ' hidden' : ''} data-sort-id="${id}">
+        <div class="product-reorder-row-top">
+          <span class="product-reorder-num">${index + 1}</span>
+          <span class="product-reorder-name">${escapeHtml(product.name)}</span>
+        </div>
+        ${sortControlsMobileHtml(id, index + 1, order.length)}
+      </div>`;
+    }
     return `
       <div class="product-reorder-row"${hidden ? ' hidden' : ''} data-sort-id="${id}">
         <span class="admin-row-num product-reorder-num">${index + 1}</span>
@@ -766,9 +795,12 @@ async function loadProductsList() {
   if (reorderBar) {
     if (canSortProducts) {
       reorderBar.hidden = false;
+      const mobileHint = isAdminMobileView()
+        ? ' В окне можно ввести номер места или нажать ↑↓.'
+        : '';
       reorderBar.innerHTML = `
         <div class="admin-sort-toolbar">
-          <p class="admin-section-hint">${getReorderHintText(reorderContext)}</p>
+          <p class="admin-section-hint">${getReorderHintText(reorderContext)}${mobileHint}</p>
           <button type="button" class="btn btn-primary btn-sm" id="open-product-reorder">Изменить порядок</button>
         </div>`;
     } else {
