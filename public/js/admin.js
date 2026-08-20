@@ -122,6 +122,10 @@ function mountAdminMobileNav(active) {
   });
 }
 
+function closeAdminMobileChrome() {
+  setAdminMobileMoreOpen(false);
+}
+
 function initAdminMobileChrome() {
   mountAdminMobileNav(getAdminActivePage());
 }

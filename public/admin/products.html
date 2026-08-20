@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=overlays-content">
   <meta name="theme-color" content="#e84393">
   <title>Админ — Товары | Мороженое Избербаш</title>
   <link rel="stylesheet" href="/css/style.css">
@@ -25,12 +25,11 @@
         <details id="products-list-section" class="admin-collapsible-section" open>
           <summary class="admin-collapsible-summary" id="products-list-summary">Список товаров</summary>
           <div class="admin-collapsible-body">
-        <div id="products-reorder-bar" class="admin-reorder-bar" hidden></div>
-        <div id="product-filters" class="category-filters" style="justify-content:flex-start;margin-bottom:12px">
-          <button class="filter-chip category-chip active" data-filter="all">Все</button>
-          <button class="filter-chip category-chip" data-filter="new">Новые</button>
-          <button class="filter-chip category-chip" data-filter="out_of_stock">Нет в наличии</button>
-          <button class="filter-chip category-chip" data-filter="deleted">Удалённые</button>
+        <div id="product-filters" class="admin-product-tabs" role="tablist" aria-label="Фильтр товаров">
+          <button type="button" class="admin-product-tab active" role="tab" aria-selected="true" data-filter="all">Все</button>
+          <button type="button" class="admin-product-tab" role="tab" aria-selected="false" data-filter="new">Новые</button>
+          <button type="button" class="admin-product-tab" role="tab" aria-selected="false" data-filter="out_of_stock">Нет в наличии</button>
+          <button type="button" class="admin-product-tab" role="tab" aria-selected="false" data-filter="deleted">Удалённые</button>
         </div>
         <div class="admin-products-toolbar">
           <input type="search" id="product-search" class="admin-products-search" placeholder="Поиск по названию..." autocomplete="off">
@@ -38,6 +37,7 @@
             <option value="">Все категории</option>
           </select>
         </div>
+        <div id="products-reorder-bar" class="admin-reorder-bar" hidden></div>
         <div id="products-list"></div>
           </div>
         </details>

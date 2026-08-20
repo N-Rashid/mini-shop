@@ -30,11 +30,20 @@ async function loadHomeContent() {
   }
 }
 
+function renderHighlightChip(filter, label, modifier, icon) {
+  const isActive = activeCategory === filter && activeTag === filter;
+  return `
+    <button type="button" class="category-chip category-chip-highlight category-chip--${modifier}${isActive ? ' active' : ''}" data-filter="${filter}">
+      <span class="category-chip-icon" aria-hidden="true">${icon}</span>${label}
+    </button>
+  `;
+}
+
 function renderDesktopCategoryChips(categories) {
   return `
     <button class="category-chip${activeCategory === '' && activeTag === '' ? ' active' : ''}" data-filter="">Все</button>
-    <button class="category-chip category-chip-highlight${activeCategory === 'new' && activeTag === 'new' ? ' active' : ''}" data-filter="new">Новинки</button>
-    <button class="category-chip category-chip-highlight${activeCategory === 'sale' && activeTag === 'sale' ? ' active' : ''}" data-filter="sale">Акции</button>
+    ${renderHighlightChip('new', 'Новинки', 'new', '✦')}
+    ${renderHighlightChip('sale', 'Акции', 'sale', '%')}
     ${categories.map(c => `
       <button class="category-chip${activeCategory === `cat-${c.id}` ? ' active' : ''}" data-filter="cat-${c.id}">${escapeHtml(c.name)}</button>
     `).join('')}
@@ -43,8 +52,8 @@ function renderDesktopCategoryChips(categories) {
 
 function renderQuickCategoryChips() {
   return `
-    <button class="category-chip category-chip-highlight${activeCategory === 'new' && activeTag === 'new' ? ' active' : ''}" data-filter="new">Новинки</button>
-    <button class="category-chip category-chip-highlight${activeCategory === 'sale' && activeTag === 'sale' ? ' active' : ''}" data-filter="sale">Акции</button>
+    ${renderHighlightChip('new', 'Новинки', 'new', '✦')}
+    ${renderHighlightChip('sale', 'Акции', 'sale', '%')}
   `;
 }
 
@@ -218,6 +227,54 @@ function updateCatalogFilterLabel() {
   if (label) label.textContent = getCatalogFilterLabel();
 }
 
+function isAnyCatalogDropdownOpen() {
+  return CATALOG_DROPDOWNS.some(([id]) => document.getElementById(id)?.classList.contains('open'));
+}
+
+function closeAllCatalogDropdowns() {
+  setCatalogDropdownOpen('', false);
+}
+
+function ensureCatalogDropdownBackdrop() {
+  let backdrop = document.getElementById('catalog-dropdown-backdrop');
+  if (backdrop) return backdrop;
+
+  backdrop = document.createElement('button');
+  backdrop.type = 'button';
+  backdrop.id = 'catalog-dropdown-backdrop';
+  backdrop.className = 'catalog-dropdown-backdrop';
+  backdrop.hidden = true;
+  backdrop.setAttribute('aria-label', 'Закрыть меню');
+  backdrop.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeAllCatalogDropdowns();
+  });
+  document.body.appendChild(backdrop);
+  return backdrop;
+}
+
+function syncCatalogDropdownBackdrop() {
+  const backdrop = ensureCatalogDropdownBackdrop();
+  backdrop.hidden = !isAnyCatalogDropdownOpen();
+}
+
+function setupCatalogDropdownDismiss() {
+  document.addEventListener('pointerdown', (e) => {
+    if (!isAnyCatalogDropdownOpen()) return;
+    const inside = CATALOG_DROPDOWNS.some(([id]) => document.getElementById(id)?.contains(e.target));
+    const onBackdrop = e.target.id === 'catalog-dropdown-backdrop';
+    if (inside || onBackdrop) return;
+    e.preventDefault();
+    e.stopPropagation();
+    closeAllCatalogDropdowns();
+  }, true);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeAllCatalogDropdowns();
+  });
+}
+
 function setCatalogDropdownOpen(dropdownId, open) {
   CATALOG_DROPDOWNS.forEach(([id, toggleId, menuId]) => {
     const dropdown = document.getElementById(id);
@@ -225,11 +282,12 @@ function setCatalogDropdownOpen(dropdownId, open) {
     const menu = document.getElementById(menuId);
     if (!dropdown || !toggle || !menu) return;
 
-    const isOpen = id === dropdownId && open;
+    const isOpen = open && dropdownId ? id === dropdownId : false;
     dropdown.classList.toggle('open', isOpen);
     toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
     menu.hidden = !isOpen;
   });
+  syncCatalogDropdownBackdrop();
 }
 
 function setupCatalogCategoryDropdown() {
@@ -280,21 +338,6 @@ function setupCatalogFilterDropdown() {
       renderProducts();
       setCatalogDropdownOpen('catalog-filter-dropdown', false);
     });
-  });
-
-  document.addEventListener('click', (e) => {
-    CATALOG_DROPDOWNS.forEach(([id]) => {
-      const dropdown = document.getElementById(id);
-      if (dropdown && !dropdown.contains(e.target)) {
-        setCatalogDropdownOpen(id, false);
-      }
-    });
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      CATALOG_DROPDOWNS.forEach(([id]) => setCatalogDropdownOpen(id, false));
-    }
   });
 
   updateCatalogFilterLabel();
@@ -433,6 +476,7 @@ function setupSearch() {
 
   loadHomeContent();
   loadCategories();
+  setupCatalogDropdownDismiss();
   setupCatalogCategoryDropdown();
   setupCatalogFilterDropdown();
   loadProducts();
