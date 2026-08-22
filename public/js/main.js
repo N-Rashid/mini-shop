@@ -143,7 +143,7 @@ function syncCategoryChips(container) {
     } else if (filter === '') {
       isActive = activeCategory === '' && activeTag === '';
     } else {
-      isActive = activeCategory === filter && activeTag === '';
+      isActive = activeCategory === filter;
     }
     chip.classList.toggle('active', isActive);
   });
@@ -317,12 +317,15 @@ function setupCatalogFilterDropdown() {
   menu.querySelectorAll('[data-tag]').forEach(btn => {
     btn.addEventListener('click', () => {
       activeTag = btn.dataset.tag;
-      if (activeTag === 'new') activeCategory = 'new';
-      else if (activeTag === 'sale') activeCategory = 'sale';
-      else if (activeTag === 'hit') {
-        if (activeCategory === 'new' || activeCategory === 'sale') activeCategory = '';
-      } else {
-        if (activeCategory === 'new' || activeCategory === 'sale') activeCategory = '';
+
+      if (activeCategory.startsWith('cat-')) {
+        // Внутри категории меняем только фильтр, категорию не сбрасываем
+      } else if (activeTag === 'new') {
+        activeCategory = 'new';
+      } else if (activeTag === 'sale') {
+        activeCategory = 'sale';
+      } else if (activeTag === '' && (activeCategory === 'new' || activeCategory === 'sale')) {
+        activeCategory = '';
       }
 
       syncCategoryUi();
@@ -392,6 +395,10 @@ function getFilteredProducts() {
   if (activeCategory.startsWith('cat-')) {
     const catId = activeCategory.replace('cat-', '');
     list = list.filter(p => productHasCategory(p, catId));
+  } else if (activeCategory === 'new') {
+    list = list.filter(p => p.is_new);
+  } else if (activeCategory === 'sale') {
+    list = list.filter(p => p.is_on_sale);
   }
 
   if (activeTag === 'new') {
