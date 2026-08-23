@@ -114,7 +114,7 @@ function getReorderHintText(ctx) {
   if (ctx?.type === 'category') {
     const category = categories.find(c => c.id === ctx.categoryId);
     if (category?.is_featured_home) {
-      return `Порядок на главной — категория «${ctx.categoryName}»`;
+      return `Порядок на главной — первые товары в каталоге («${ctx.categoryName}»)`;
     }
     return `Порядок в категории «${ctx.categoryName}» на сайте`;
   }

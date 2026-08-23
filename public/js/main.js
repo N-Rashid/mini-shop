@@ -372,7 +372,9 @@ function usesHomeCategorySort() {
 }
 
 function getProductPrimaryCategoryId(product) {
-  const ids = productCategoryIds(product);
+  const ids = product.categories?.length
+    ? product.categories.filter(c => !c.is_featured_home).map(c => String(c.id))
+    : productCategoryIds(product);
   if (!ids.length) return null;
 
   let bestId = ids[0];

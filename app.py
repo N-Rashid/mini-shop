@@ -728,7 +728,20 @@ def set_product_categories(conn, product_id, category_ids):
     refresh_product_primary_category(conn, product_id)
 
 
-def map_product(conn, row):
+def strip_featured_home_from_product(d, featured_id=None):
+    cats = [c for c in d.get('categories', []) if not c.get('is_featured_home')]
+    d['categories'] = cats
+    d['category_ids'] = [c['id'] for c in cats]
+    visible = [c for c in cats if not c.get('is_featured_home')]
+    d['category'] = visible[0] if visible else None
+    if featured_id is not None and d.get('category_sort_orders'):
+        orders = dict(d['category_sort_orders'])
+        orders.pop(str(featured_id), None)
+        d['category_sort_orders'] = orders
+    return d
+
+
+def map_product(conn, row, for_public=False):
     d = row_to_dict(row)
     d['images'] = get_product_images(conn, d['id'])
     d['price_pack'] = d.get('price_pack') if d.get('price_pack') is not None else d.get('cost', 0)
@@ -759,7 +772,8 @@ def map_product(conn, row):
     d['category'] = visible_cats[0] if visible_cats else (cats[0] if cats else None)
     if not cats and d.get('category_id'):
         cat = conn.execute(
-            'SELECT id, name FROM categories WHERE id = ? AND deleted_at IS NULL',
+            '''SELECT id, name FROM categories
+               WHERE id = ? AND deleted_at IS NULL AND COALESCE(is_featured_home, 0) = 0''',
             (d['category_id'],)
         ).fetchone()
         if cat:
@@ -767,6 +781,8 @@ def map_product(conn, row):
             d['category'] = cat_dict
             d['categories'] = [cat_dict]
             d['category_ids'] = [cat_dict['id']]
+    if for_public:
+        strip_featured_home_from_product(d, get_featured_home_category_id(conn))
     return d
 
 
@@ -1203,7 +1219,7 @@ def list_favorites():
         ''',
         (session['user_id'],),
     ).fetchall()
-    result = [map_product(conn, r) for r in rows]
+    result = [map_product(conn, r, for_public=True) for r in rows]
     conn.close()
     return jsonify(result)
 
@@ -1476,7 +1492,7 @@ def list_products():
     else:
         sql += ' ORDER BY is_bestseller DESC, sort_order ASC, id ASC'
     rows = conn.execute(sql, params).fetchall()
-    result = [map_product(conn, r) for r in rows]
+    result = [map_product(conn, r, for_public=True) for r in rows]
     conn.close()
     return jsonify(result)
 
@@ -1491,7 +1507,7 @@ def get_product(product_id):
     if not row:
         conn.close()
         return jsonify({'error': 'Товар не найден'}), 404
-    result = map_product(conn, row)
+    result = map_product(conn, row, for_public=True)
     conn.close()
     return jsonify(result)
 
