@@ -412,6 +412,12 @@ function compareCatalogAvailability(a, b) {
   return 0;
 }
 
+function compareBestsellerRank(a, b) {
+  const aHit = a.is_bestseller ? 0 : 1;
+  const bHit = b.is_bestseller ? 0 : 1;
+  return aHit - bHit;
+}
+
 function sortProductsByCategoryGroups(list) {
   return [...list].sort((a, b) => {
     const stockCmp = compareCatalogAvailability(a, b);
@@ -425,17 +431,24 @@ function sortProductsByCategoryGroups(list) {
 }
 
 function sortProductsHomeDefault(list) {
-  if (!featuredProductIds.length) {
-    return sortProductsByCategoryGroups(list);
-  }
-
   const featuredSet = new Set(featuredProductIds.map(String));
   const byId = new Map(list.map(p => [String(p.id), p]));
+
   const featured = featuredProductIds
     .map(id => byId.get(String(id)))
     .filter(Boolean);
-  const rest = list.filter(p => !featuredSet.has(String(p.id)));
-  return [...featured, ...sortProductsByCategoryGroups(rest)];
+  const rest = featured.length
+    ? list.filter(p => !featuredSet.has(String(p.id)))
+    : list;
+
+  const hits = rest.filter(p => p.is_bestseller);
+  const regular = rest.filter(p => !p.is_bestseller);
+
+  return [
+    ...featured,
+    ...sortProductsByCategoryGroups(hits),
+    ...sortProductsByCategoryGroups(regular),
+  ];
 }
 
 function sortProducts(list) {
@@ -450,16 +463,15 @@ function sortProducts(list) {
     const bOut = b.in_stock === false ? 1 : 0;
     if (aOut !== bOut) return aOut - bOut;
 
-    const aHit = a.is_bestseller ? 0 : 1;
-    const bHit = b.is_bestseller ? 0 : 1;
-    if (aHit !== bHit) return aHit - bHit;
-
     if (productSort === 'date_desc') {
       return productCreatedTime(b) - productCreatedTime(a) || a.id - b.id;
     }
     if (productSort === 'date_asc') {
       return productCreatedTime(a) - productCreatedTime(b) || a.id - b.id;
     }
+
+    const hitCmp = compareBestsellerRank(a, b);
+    if (hitCmp) return hitCmp;
 
     return productCatalogSortOrder(a) - productCatalogSortOrder(b) || a.id - b.id;
   });
