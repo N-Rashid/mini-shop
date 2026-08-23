@@ -978,9 +978,27 @@ nav a.active {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 24px;
-  margin-bottom: 40px;
+  margin-bottom: 24px;
   width: 100%;
   min-width: 0;
+}
+
+.catalog-load-more-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 40px;
+}
+
+.catalog-load-more-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.catalog-load-more-btn {
+  min-width: 220px;
 }
 
 @media (max-width: 960px) {
@@ -2478,6 +2496,52 @@ body.has-mini-cart-bar:not(.cart-page) .site-footer {
   font-size: 0.95rem;
   background: var(--surface);
   color: var(--text);
+}
+
+.admin-card-category-featured {
+  background: rgba(232, 67, 147, 0.12);
+  color: var(--accent);
+  border: 1px solid rgba(232, 67, 147, 0.35);
+}
+
+.category-picker-chip-admin {
+  border-style: dashed;
+}
+
+.form-hint-inline {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 0.88em;
+}
+
+.admin-featured-add-form {
+  margin-bottom: 18px;
+}
+
+.admin-featured-add-form .admin-products-category-filter {
+  flex: 1 1 260px;
+}
+
+.admin-product-date,
+.admin-card-date {
+  color: var(--muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.admin-card-date {
+  margin-top: 4px;
+}
+
+.admin-product-date-cell {
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.admin-product-added-at {
+  margin-top: -4px;
+  margin-bottom: 12px;
 }
 
 .admin-inline-form input {
@@ -4183,7 +4247,16 @@ body {
   .products-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .catalog-load-more-wrap {
     margin-bottom: 24px;
+  }
+
+  .catalog-load-more-btn {
+    width: 100%;
+    max-width: 320px;
   }
 
   .product-card .product-body {

@@ -2,6 +2,7 @@ let categories = [];
 let productFilter = 'all';
 let productSearchQuery = '';
 let productCategoryFilter = '';
+let productDateSort = 'default';
 let productSortIds = [];
 let productReorderModalDirty = false;
 let productReorderModalOrder = [];
@@ -82,6 +83,7 @@ function getReorderContext() {
   if (productFilter !== 'all') return null;
   if (productSearchQuery.trim()) return null;
   if (productCategoryFilter === 'none') return null;
+  if (productDateSort !== 'default') return null;
 
   if (productCategoryFilter) {
     const categoryId = parseInt(productCategoryFilter, 10);
@@ -110,6 +112,10 @@ function getReorderProductList(activeProducts) {
 
 function getReorderHintText(ctx) {
   if (ctx?.type === 'category') {
+    const category = categories.find(c => c.id === ctx.categoryId);
+    if (category?.is_featured_home) {
+      return `Порядок на главной — категория «${ctx.categoryName}»`;
+    }
     return `Порядок в категории «${ctx.categoryName}» на сайте`;
   }
   return 'Порядок на главной (все товары) в каталоге';
@@ -637,6 +643,35 @@ function bindSortableList(root, config) {
   }, { signal });
 }
 
+function productAddedDateHtml(p) {
+  const full = formatDate(p.created_at);
+  const short = formatDateShort(p.created_at);
+  return `<span class="admin-product-date" title="${escapeHtml(full)}">${short}</span>`;
+}
+
+function sortAdminProductsByDate(products) {
+  if (productDateSort === 'date_desc') {
+    return [...products].sort((a, b) => productCreatedTime(b) - productCreatedTime(a) || b.id - a.id);
+  }
+  if (productDateSort === 'date_asc') {
+    return [...products].sort((a, b) => productCreatedTime(a) - productCreatedTime(b) || a.id - b.id);
+  }
+  return products;
+}
+
+function buildDisplayProducts(products, reorderContext) {
+  if (productDateSort === 'date_desc' || productDateSort === 'date_asc') {
+    const active = sortAdminProductsByDate(products.filter(p => !p.deleted));
+    const deleted = sortAdminProductsByDate(products.filter(p => p.deleted));
+    return [...active, ...deleted];
+  }
+  if (reorderContext?.type === 'category') {
+    return sortProductsForCatalogOrder(products.filter(p => !p.deleted), reorderContext.categoryId)
+      .concat(products.filter(p => p.deleted));
+  }
+  return products;
+}
+
 function productBadges(p) {
   const badges = [];
   if (p.deleted) badges.push('<span class="badge badge-deleted">Удалён</span>');
@@ -648,23 +683,40 @@ function productBadges(p) {
   return badges.join(' ');
 }
 
+function adminProductCategoryLabels(p) {
+  const cats = p.categories?.length
+    ? p.categories
+    : (p.category ? [p.category] : []);
+  return cats.map(c => c.name);
+}
+function adminProductCategoriesHtml(p) {
+  const cats = p.categories?.length
+    ? p.categories
+    : (p.category ? [p.category] : []);
+  return cats.map(c => {
+    const cls = c.is_featured_home
+      ? 'admin-card-category admin-card-category-featured'
+      : 'admin-card-category';
+    return `<span class="${cls}">${escapeHtml(c.name)}</span>`;
+  }).join('');
+}
+
 function renderProductCard(p, num) {
   const priceLine = p.allow_piece_sale && p.price_piece
     ? `${formatPrice(p.price_pack)} · ${formatPrice(p.price_piece)}/шт`
     : formatPrice(p.price_pack);
   const badges = productBadges(p);
-  const categoryNames = productCategoryNames(p);
+  const categoryHtml = adminProductCategoriesHtml(p);
 
   return `
     <article class="admin-card admin-card-compact ${p.deleted ? 'admin-card-muted' : ''}${p.in_stock === false && !p.deleted ? ' admin-card-oos' : ''}">
       <div class="admin-card-row">
         <div class="admin-card-main">
           <strong class="admin-card-name">${typeof num === 'number' ? `<span class="admin-row-num">${num}.</span> ` : ''}${escapeHtml(p.name)}</strong>
-          ${categoryNames.length ? `
-            <div class="admin-card-categories">
-              ${categoryNames.map(name => `<span class="admin-card-category">${escapeHtml(name)}</span>`).join('')}
-            </div>` : ''}
+          ${categoryHtml ? `
+            <div class="admin-card-categories">${categoryHtml}</div>` : ''}
           <div class="admin-card-price">${priceLine}</div>
+          <div class="admin-card-date">На сайте: ${productAddedDateHtml(p)}</div>
         </div>
         ${badges ? `<div class="admin-card-badges">${badges}</div>` : ''}
       </div>
@@ -684,10 +736,15 @@ async function loadProductCategoryOptions() {
 
   const addBox = document.getElementById('add-category-checkboxes');
   const listFilter = document.getElementById('product-category-filter');
-  const categoryOptions = categories.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+  const filterCategories = categories
+    .filter(c => !c.deleted)
+    .sort((a, b) => (b.is_featured_home || 0) - (a.is_featured_home || 0) || (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id);
+  const categoryOptions = filterCategories
+    .map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`)
+    .join('');
 
   if (addBox) {
-    addBox.innerHTML = renderCategoryPicker(categories);
+    addBox.innerHTML = renderCategoryPicker(categories, [], 'category_ids', true);
   }
 
   if (listFilter) {
@@ -732,6 +789,11 @@ function setupProductFilters() {
     productCategoryFilter = e.target.value;
     loadProductsList();
   });
+
+  document.getElementById('product-date-sort')?.addEventListener('change', (e) => {
+    productDateSort = e.target.value || 'default';
+    loadProductsList();
+  });
 }
 
 function syncProductStatusTabs() {
@@ -760,6 +822,10 @@ function filterAdminProducts(products) {
   }
 
   return list;
+}
+
+function isProductDateSorted() {
+  return productDateSort !== 'default';
 }
 
 function isProductListFiltered() {
@@ -840,10 +906,7 @@ async function loadProductsList() {
   const reorderContext = getReorderContext();
   const reorderProducts = getReorderProductList(activeProducts);
   const products = filterAdminProducts(allProducts);
-  const displayProducts = reorderContext?.type === 'category'
-    ? sortProductsForCatalogOrder(products.filter(p => !p.deleted), reorderContext.categoryId)
-        .concat(products.filter(p => p.deleted))
-    : products;
+  const displayProducts = buildDisplayProducts(products, reorderContext);
   productSortIds = reorderProducts.map(p => p.id);
   const canSortProducts = Boolean(reorderContext) && reorderProducts.length > 1;
 
@@ -865,6 +928,7 @@ async function loadProductsList() {
             <th>№</th>
             <th>Название</th>
             <th>Категория</th>
+            <th>На сайте</th>
             <th>Упак.</th>
             <th>Метки</th>
             <th></th>
@@ -879,7 +943,8 @@ async function loadProductsList() {
             <tr style="${p.deleted ? 'opacity:0.5' : ''}">
               <td class="admin-row-num">${num}</td>
               <td>${escapeHtml(p.name)}</td>
-              <td>${escapeHtml(productCategoryNames(p).join(', ') || '—')}</td>
+              <td>${escapeHtml(adminProductCategoryLabels(p).join(', ') || '—')}</td>
+              <td class="admin-product-date-cell">${productAddedDateHtml(p)}</td>
               <td>${formatPrice(p.price_pack)}</td>
               <td class="data-table-badges">${productBadges(p) || '—'}</td>
               <td class="data-table-actions">
@@ -921,6 +986,7 @@ async function loadProductsList() {
   }
 
   container.innerHTML = `
+    ${isProductDateSorted() ? '<p class="admin-section-hint">Сортировка каталога недоступна при сортировке по дате.</p>' : ''}
     ${isProductListFiltered() ? '<p class="admin-section-hint">Показаны отфильтрованные товары. Сортировка доступна для общего списка или одной категории без поиска.</p>' : ''}
     ${isProductStatusFiltered() ? '<p class="admin-section-hint">Сортировка каталога доступна только во вкладке «Все».</p>' : ''}
     ${productsListHtml}`;

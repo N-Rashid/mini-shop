@@ -176,6 +176,25 @@ function formatDate(dateStr) {
   });
 }
 
+function formatDateShort(dateStr) {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr.includes('T') ? dateStr : dateStr.replace(' ', 'T') + 'Z');
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString('ru-RU', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+  });
+}
+
+function productCreatedTime(productOrDateStr) {
+  const dateStr = typeof productOrDateStr === 'string'
+    ? productOrDateStr
+    : productOrDateStr?.created_at;
+  if (!dateStr) return 0;
+  const raw = dateStr.includes('T') ? dateStr : `${dateStr.replace(' ', 'T')}Z`;
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
 function orderStatusLabel(status) {
   const labels = {
     pending: 'Ожидание',
@@ -312,7 +331,11 @@ function productCategoryIds(product) {
 }
 
 function productCategoryNames(product) {
-  if (product.categories?.length) return product.categories.map(c => c.name);
+  if (product.categories?.length) {
+    return product.categories
+      .filter(c => !c.is_featured_home)
+      .map(c => c.name);
+  }
   if (product.category?.name) return [product.category.name];
   return [];
 }
@@ -321,17 +344,20 @@ function productHasCategory(product, categoryId) {
   return productCategoryIds(product).includes(String(categoryId));
 }
 
-function renderCategoryPicker(categories, selectedIds = [], inputName = 'category_ids') {
-  if (!categories.length) {
+function renderCategoryPicker(categories, selectedIds = [], inputName = 'category_ids', includeFeaturedHome = false) {
+  const visible = (includeFeaturedHome ? categories : categories.filter(c => !c.is_featured_home))
+    .filter(c => !c.deleted)
+    .sort((a, b) => (b.is_featured_home || 0) - (a.is_featured_home || 0) || (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id);
+  if (!visible.length) {
     return '<p class="form-hint category-picker-empty">Сначала добавьте категории</p>';
   }
   const selected = new Set(selectedIds.map(String));
   return `
     <div class="category-picker">
-      ${categories.map(c => `
-        <label class="category-picker-chip">
+      ${visible.map(c => `
+        <label class="category-picker-chip${c.is_featured_home ? ' category-picker-chip-admin' : ''}">
           <input type="checkbox" name="${inputName}" value="${c.id}"${selected.has(String(c.id)) ? ' checked' : ''}>
-          <span>${escapeHtml(c.name)}</span>
+          <span>${escapeHtml(c.name)}${c.is_featured_home ? ' <em class="form-hint-inline">(главная)</em>' : ''}</span>
         </label>
       `).join('')}
     </div>`;

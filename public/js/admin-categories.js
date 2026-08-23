@@ -5,6 +5,10 @@ let categorySortDirty = false;
 let categoriesListLoading = false;
 let categoriesSortAbort = null;
 
+function catalogCategoriesList(list) {
+  return list.filter(c => !c.is_featured_home);
+}
+
 function sortControlsHtml(id) {
   return `
     <div class="admin-sort-controls">
@@ -324,13 +328,14 @@ async function loadCategories() {
   categoriesListLoading = true;
   try {
   categories = await api('/api/admin/categories');
-  categorySortIds = categories.map(c => c.id);
-  const canSortCategories = !editingCategoryId && categories.length > 1;
+  const regularCategories = catalogCategoriesList(categories);
+  categorySortIds = regularCategories.map(c => c.id);
+  const canSortCategories = !editingCategoryId && regularCategories.length > 1;
 
   const list = document.getElementById('categories-list');
   if (!list) return;
 
-  if (!categories.length) {
+  if (!regularCategories.length) {
     list.innerHTML = '<p style="color:var(--muted)">Категорий нет</p>';
     return;
   }
@@ -348,8 +353,8 @@ async function loadCategories() {
       <table class="data-table data-table-compact">
         <thead><tr><th></th><th>№</th><th>Название</th><th>Статус</th><th></th></tr></thead>
         <tbody id="categories-sortable">
-          ${categories.map((c) => {
-            const num = categories.findIndex(x => x.id === c.id) + 1;
+          ${regularCategories.map((c) => {
+            const num = regularCategories.findIndex(x => x.id === c.id) + 1;
             if (editingCategoryId === c.id) {
               return `
                 <tr>
@@ -381,7 +386,7 @@ async function loadCategories() {
       </table>
     </div>
     <div class="admin-mobile-only admin-cards admin-cards-compact" id="categories-sortable-mobile">
-      ${categories.map((c, index) => renderCategoryCard(
+      ${regularCategories.map((c, index) => renderCategoryCard(
         c,
         editingCategoryId === c.id,
         canSortCategories,
@@ -391,7 +396,7 @@ async function loadCategories() {
 
   list.innerHTML = adminCollapsibleHtml(
     categoriesBodyHtml,
-    categories.length,
+    regularCategories.length,
     'Список категорий',
     10
   );

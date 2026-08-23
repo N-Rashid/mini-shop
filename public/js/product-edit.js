@@ -34,6 +34,7 @@ async function openProductEditModal(productId, products, onSaved) {
   overlay.innerHTML = `
     <div class="modal" role="dialog">
       <h2>Редактировать: ${escapeHtml(p.name)}</h2>
+      <p class="form-hint admin-product-added-at">На сайте с ${formatDate(p.created_at)}</p>
       <form id="edit-product-form">
         <div class="form-group">
           <label>Название *</label>
@@ -42,7 +43,7 @@ async function openProductEditModal(productId, products, onSaved) {
         <div class="form-group">
           <label>Категории *</label>
           <p class="form-hint">Выберите хотя бы одну</p>
-          ${renderCategoryPicker(activeCats, productCategoryIds(p))}
+          ${renderCategoryPicker(activeCats, productCategoryIds(p), 'category_ids', Boolean(editCategories.some(c => c.is_featured_home)))}
         </div>
         <div class="form-row">
           <div class="form-group">

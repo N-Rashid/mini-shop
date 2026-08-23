@@ -148,6 +148,7 @@ def migrate_db(conn):
     ''')
     add_column_if_missing(conn, 'categories', 'sort_order', 'INTEGER DEFAULT 0')
     add_column_if_missing(conn, 'categories', 'deleted_at', 'TEXT NULL')
+    add_column_if_missing(conn, 'categories', 'is_featured_home', 'INTEGER DEFAULT 0')
 
     product_cols = table_columns(conn, 'products')
     for col, typedef in [
@@ -326,6 +327,35 @@ def migrate_db(conn):
             ), 0)
         ''')
         mark_migration(conn, 'product_categories_sort_order_init')
+
+    if not migration_done(conn, 'featured_home_category'):
+        featured = conn.execute(
+            'SELECT id FROM categories WHERE is_featured_home = 1 LIMIT 1'
+        ).fetchone()
+        if not featured:
+            conn.execute(
+                'INSERT INTO categories (name, sort_order, is_featured_home) VALUES (?, 0, 1)',
+                ('Избранное (главная)',),
+            )
+            featured = conn.execute(
+                'SELECT id FROM categories WHERE is_featured_home = 1 LIMIT 1'
+            ).fetchone()
+        featured_id = featured['id']
+        legacy = conn.execute(
+            'SELECT name FROM sqlite_master WHERE type = ? AND name = ?',
+            ('table', 'featured_products'),
+        ).fetchone()
+        if legacy:
+            rows = conn.execute(
+                'SELECT product_id, sort_order FROM featured_products ORDER BY sort_order ASC, product_id ASC'
+            ).fetchall()
+            for row in rows:
+                conn.execute('''
+                    INSERT OR IGNORE INTO product_categories (product_id, category_id, sort_order)
+                    VALUES (?, ?, ?)
+                ''', (row['product_id'], featured_id, row['sort_order']))
+            conn.execute('DROP TABLE featured_products')
+        mark_migration(conn, 'featured_home_category')
 
     conn.executescript('''
         CREATE TABLE IF NOT EXISTS favorites (
@@ -553,13 +583,38 @@ def get_product_images(conn, product_id):
 
 def get_product_categories(conn, product_id):
     rows = conn.execute('''
-        SELECT c.id, c.name
+        SELECT c.id, c.name, COALESCE(c.is_featured_home, 0) AS is_featured_home
         FROM product_categories pc
         JOIN categories c ON c.id = pc.category_id
         WHERE pc.product_id = ?
         ORDER BY c.sort_order ASC, c.id ASC
     ''', (product_id,)).fetchall()
     return [row_to_dict(r) for r in rows]
+
+
+def get_featured_home_category(conn):
+    return conn.execute(
+        'SELECT id, name, sort_order, is_featured_home FROM categories WHERE is_featured_home = 1 LIMIT 1'
+    ).fetchone()
+
+
+def get_featured_home_category_id(conn):
+    row = get_featured_home_category(conn)
+    return row['id'] if row else None
+
+
+def get_featured_product_ids(conn):
+    featured_id = get_featured_home_category_id(conn)
+    if not featured_id:
+        return []
+    rows = conn.execute('''
+        SELECT pc.product_id
+        FROM product_categories pc
+        JOIN products p ON p.id = pc.product_id
+        WHERE pc.category_id = ? AND p.deleted_at IS NULL
+        ORDER BY pc.sort_order ASC, pc.product_id ASC
+    ''', (featured_id,)).fetchall()
+    return [row['product_id'] for row in rows]
 
 
 def parse_category_ids(raw_values):
@@ -574,6 +629,14 @@ def parse_category_ids(raw_values):
         if cat_id > 0 and cat_id not in ids:
             ids.append(cat_id)
     return ids
+
+
+def primary_category_id_from_list(conn, category_ids):
+    featured_id = get_featured_home_category_id(conn)
+    for cat_id in category_ids:
+        if cat_id != featured_id:
+            return cat_id
+    return category_ids[0] if category_ids else None
 
 
 def parse_category_ids_from_form():
@@ -595,7 +658,7 @@ def refresh_product_primary_category(conn, product_id):
         SELECT pc.category_id
         FROM product_categories pc
         JOIN categories c ON c.id = pc.category_id
-        WHERE pc.product_id = ?
+        WHERE pc.product_id = ? AND COALESCE(c.is_featured_home, 0) = 0
         ORDER BY c.sort_order ASC, c.id ASC
         LIMIT 1
     ''', (product_id,)).fetchone()
@@ -614,6 +677,19 @@ def get_product_category_sort_orders(conn, product_id):
 
 
 def set_product_categories(conn, product_id, category_ids):
+    featured_id = get_featured_home_category_id(conn)
+    normalized_ids = []
+    for raw_id in category_ids or []:
+        try:
+            cat_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if cat_id > 0 and cat_id not in normalized_ids:
+            normalized_ids.append(cat_id)
+
+    wants_featured = bool(featured_id and featured_id in normalized_ids)
+    regular_ids = [cat_id for cat_id in normalized_ids if cat_id != featured_id]
+
     existing = {
         row['category_id']: row['sort_order']
         for row in conn.execute(
@@ -622,8 +698,8 @@ def set_product_categories(conn, product_id, category_ids):
         ).fetchall()
     }
     conn.execute('DELETE FROM product_categories WHERE product_id = ?', (product_id,))
-    linked = []
-    for cat_id in category_ids:
+
+    for cat_id in regular_ids:
         if not conn.execute('SELECT id FROM categories WHERE id = ?', (cat_id,)).fetchone():
             continue
         sort_order = existing.get(cat_id)
@@ -636,11 +712,20 @@ def set_product_categories(conn, product_id, category_ids):
             'INSERT INTO product_categories (product_id, category_id, sort_order) VALUES (?, ?, ?)',
             (product_id, cat_id, sort_order),
         )
-        linked.append(cat_id)
-    conn.execute(
-        'UPDATE products SET category_id = ? WHERE id = ?',
-        (linked[0] if linked else None, product_id),
-    )
+
+    if wants_featured and featured_id:
+        sort_order = existing.get(featured_id)
+        if sort_order is None:
+            sort_order = conn.execute(
+                'SELECT COALESCE(MAX(sort_order), 0) FROM product_categories WHERE category_id = ?',
+                (featured_id,),
+            ).fetchone()[0] + 1
+        conn.execute(
+            'INSERT INTO product_categories (product_id, category_id, sort_order) VALUES (?, ?, ?)',
+            (product_id, featured_id, sort_order),
+        )
+
+    refresh_product_primary_category(conn, product_id)
 
 
 def map_product(conn, row):
@@ -670,7 +755,8 @@ def map_product(conn, row):
     d['categories'] = cats
     d['category_ids'] = [c['id'] for c in cats]
     d['category_sort_orders'] = get_product_category_sort_orders(conn, d['id'])
-    d['category'] = cats[0] if cats else None
+    visible_cats = [c for c in cats if not c.get('is_featured_home')]
+    d['category'] = visible_cats[0] if visible_cats else (cats[0] if cats else None)
     if not cats and d.get('category_id'):
         cat = conn.execute(
             'SELECT id, name FROM categories WHERE id = ? AND deleted_at IS NULL',
@@ -1193,20 +1279,33 @@ def admin_me():
 @app.get('/api/categories')
 def list_categories():
     conn = get_db()
-    rows = conn.execute(
-        'SELECT id, name FROM categories WHERE deleted_at IS NULL ORDER BY sort_order ASC, id ASC'
-    ).fetchall()
+    rows = conn.execute('''
+        SELECT id, name, sort_order
+        FROM categories
+        WHERE deleted_at IS NULL AND COALESCE(is_featured_home, 0) = 0
+        ORDER BY sort_order ASC, id ASC
+    ''').fetchall()
     conn.close()
     return jsonify([row_to_dict(r) for r in rows])
+
+
+@app.get('/api/featured-products')
+def list_featured_products():
+    conn = get_db()
+    ids = get_featured_product_ids(conn)
+    conn.close()
+    return jsonify(ids)
 
 
 @app.get('/api/admin/categories')
 @require_admin
 def admin_list_categories():
     conn = get_db()
-    rows = conn.execute(
-        'SELECT id, name, sort_order FROM categories ORDER BY sort_order ASC, id ASC'
-    ).fetchall()
+    rows = conn.execute('''
+        SELECT id, name, sort_order, COALESCE(is_featured_home, 0) AS is_featured_home
+        FROM categories
+        ORDER BY sort_order ASC, id ASC
+    ''').fetchall()
     conn.close()
     return jsonify([row_to_dict(r) for r in rows])
 
@@ -1248,10 +1347,14 @@ def admin_reorder_categories():
 
     conn = get_db()
     try:
+        featured_id = get_featured_home_category_id(conn)
         for idx, cat_id in enumerate(order):
+            cat_id = int(cat_id)
+            if featured_id and cat_id == featured_id:
+                continue
             updated = conn.execute(
                 'UPDATE categories SET sort_order = ? WHERE id = ?',
-                (idx + 1, int(cat_id)),
+                (idx + 1, cat_id),
             ).rowcount
             if not updated:
                 raise ValueError(f'Категория #{cat_id} не найдена')
@@ -1273,15 +1376,19 @@ def admin_update_category(category_id):
         return jsonify({'error': 'Название категории обязательно'}), 400
 
     conn = get_db()
-    existing = conn.execute(
-        'SELECT sort_order FROM categories WHERE id = ?', (category_id,)
+    category = conn.execute(
+        'SELECT sort_order, COALESCE(is_featured_home, 0) AS is_featured_home FROM categories WHERE id = ?',
+        (category_id,),
     ).fetchone()
-    if not existing:
+    if not category:
         conn.close()
         return jsonify({'error': 'Категория не найдена'}), 404
+    if category['is_featured_home']:
+        conn.close()
+        return jsonify({'error': 'Системную категорию нельзя переименовать'}), 400
 
     sort_order = (
-        int(data['sort_order']) if 'sort_order' in data else existing['sort_order']
+        int(data['sort_order']) if 'sort_order' in data else category['sort_order']
     )
     conn.execute(
         'UPDATE categories SET name = ?, sort_order = ? WHERE id = ?',
@@ -1297,11 +1404,15 @@ def admin_update_category(category_id):
 def admin_delete_category(category_id):
     conn = get_db()
     category = conn.execute(
-        'SELECT id FROM categories WHERE id = ?', (category_id,)
+        'SELECT id, COALESCE(is_featured_home, 0) AS is_featured_home FROM categories WHERE id = ?',
+        (category_id,),
     ).fetchone()
     if not category:
         conn.close()
         return jsonify({'error': 'Категория не найдена'}), 404
+    if category['is_featured_home']:
+        conn.close()
+        return jsonify({'error': 'Системную категорию нельзя удалить'}), 400
 
     conn.execute(
         'UPDATE products SET category_id = NULL WHERE category_id = ?',
@@ -1331,6 +1442,14 @@ def list_products():
     params = []
 
     if category_id:
+        category_id = int(category_id)
+        featured = conn.execute(
+            'SELECT COALESCE(is_featured_home, 0) AS is_featured_home FROM categories WHERE id = ?',
+            (category_id,),
+        ).fetchone()
+        if featured and featured['is_featured_home']:
+            conn.close()
+            return jsonify([])
         sql = f'''
             SELECT {PRODUCT_SELECT_QUALIFIED}
             FROM products
@@ -1638,7 +1757,7 @@ def admin_create_product():
         float(request.form.get('weight_grams') or request.form.get('weight') or 0),
         request.form.get('description') or '',
         now_iso(),
-        category_ids[0] if category_ids else None,
+        primary_category_id_from_list(conn, category_ids),
         float(request.form.get('price_piece') or 0),
         float(price_pack),
         allow_piece,
@@ -1792,7 +1911,7 @@ def admin_update_product(product_id):
         int(data.get('pieces_per_pack') or data.get('pieces_per_box') or 1),
         float(data.get('weight_grams') or data.get('weight') or 0),
         data.get('description') or '',
-        category_ids[0] if category_ids else None,
+        primary_category_id_from_list(conn, category_ids),
         float(data.get('price_piece') or 0),
         float(price_pack),
         1 if data.get('allow_piece_sale') else 0,

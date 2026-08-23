@@ -11,6 +11,18 @@ let searchTimer = null;
 
 let currentUser = null;
 
+let featuredProductIds = [];
+
+let visibleProductCount = 0;
+
+function getCatalogPageSize() {
+  return window.matchMedia('(max-width: 768px)').matches ? 8 : 12;
+}
+
+function resetCatalogPagination() {
+  visibleProductCount = getCatalogPageSize();
+}
+
 const CATALOG_DROPDOWNS = [
   ['catalog-category-dropdown', 'catalog-category-toggle', 'catalog-category-menu'],
   ['catalog-filter-dropdown', 'catalog-filter-toggle', 'catalog-filter-menu'],
@@ -346,15 +358,6 @@ function setupCatalogFilterDropdown() {
   updateCatalogFilterLabel();
 }
 
-function productCreatedTime(product) {
-  if (!product.created_at) return 0;
-  const raw = product.created_at.includes('T')
-    ? product.created_at
-    : `${product.created_at.replace(' ', 'T')}Z`;
-  const date = new Date(raw);
-  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
-}
-
 function productCatalogSortOrder(product) {
   if (activeCategory.startsWith('cat-')) {
     const catId = activeCategory.replace('cat-', '');
@@ -364,7 +367,80 @@ function productCatalogSortOrder(product) {
   return product.sort_order || 0;
 }
 
+function usesHomeCategorySort() {
+  return !searchQuery && !activeCategory && !activeTag && productSort === 'default';
+}
+
+function getProductPrimaryCategoryId(product) {
+  const ids = productCategoryIds(product);
+  if (!ids.length) return null;
+
+  let bestId = ids[0];
+  let bestOrder = Infinity;
+  ids.forEach(id => {
+    const cat = catalogCategories.find(c => String(c.id) === id);
+    const order = cat ? (cat.sort_order ?? cat.id) : 999999;
+    if (order < bestOrder || (order === bestOrder && Number(id) < Number(bestId))) {
+      bestOrder = order;
+      bestId = id;
+    }
+  });
+  return bestId;
+}
+
+function getCategorySortOrderForProduct(product) {
+  const catId = getProductPrimaryCategoryId(product);
+  if (!catId) return 999999;
+  const cat = catalogCategories.find(c => String(c.id) === catId);
+  return cat ? (cat.sort_order ?? cat.id) : 999999;
+}
+
+function productOrderInPrimaryCategory(product) {
+  const catId = getProductPrimaryCategoryId(product);
+  if (!catId) return product.sort_order || 0;
+  const orders = product.category_sort_orders || {};
+  if (orders[catId] != null) return orders[catId];
+  return product.sort_order || 0;
+}
+
+function compareCatalogAvailability(a, b) {
+  const aOut = a.in_stock === false ? 1 : 0;
+  const bOut = b.in_stock === false ? 1 : 0;
+  if (aOut !== bOut) return aOut - bOut;
+  return 0;
+}
+
+function sortProductsByCategoryGroups(list) {
+  return [...list].sort((a, b) => {
+    const stockCmp = compareCatalogAvailability(a, b);
+    if (stockCmp) return stockCmp;
+
+    const catCmp = getCategorySortOrderForProduct(a) - getCategorySortOrderForProduct(b);
+    if (catCmp) return catCmp;
+
+    return productOrderInPrimaryCategory(a) - productOrderInPrimaryCategory(b) || a.id - b.id;
+  });
+}
+
+function sortProductsHomeDefault(list) {
+  if (!featuredProductIds.length) {
+    return sortProductsByCategoryGroups(list);
+  }
+
+  const featuredSet = new Set(featuredProductIds.map(String));
+  const byId = new Map(list.map(p => [String(p.id), p]));
+  const featured = featuredProductIds
+    .map(id => byId.get(String(id)))
+    .filter(Boolean);
+  const rest = list.filter(p => !featuredSet.has(String(p.id)));
+  return [...featured, ...sortProductsByCategoryGroups(rest)];
+}
+
 function sortProducts(list) {
+  if (usesHomeCategorySort()) {
+    return sortProductsHomeDefault(list);
+  }
+
   const sorted = [...list];
 
   sorted.sort((a, b) => {
@@ -421,9 +497,22 @@ function getFilteredProducts() {
   return sortProducts(list);
 }
 
-function renderProducts() {
+async function loadFeaturedOrder() {
+  try {
+    featuredProductIds = await api('/api/featured-products');
+  } catch {
+    featuredProductIds = [];
+  }
+}
+
+function renderProducts({ resetPagination = true } = {}) {
   const container = document.getElementById('products');
+  const loadMoreWrap = document.getElementById('products-load-more');
   const products = getFilteredProducts();
+
+  if (resetPagination) {
+    resetCatalogPagination();
+  }
 
   if (!products.length) {
     container.innerHTML = `
@@ -431,10 +520,17 @@ function renderProducts() {
         <h2>${searchQuery || activeCategory || activeTag ? 'Ничего не найдено' : 'Товаров пока нет'}</h2>
         <p>${searchQuery ? 'Попробуйте другой запрос' : 'Скоро появится вкусное мороженое!'}</p>
       </div>`;
+    if (loadMoreWrap) {
+      loadMoreWrap.hidden = true;
+      loadMoreWrap.innerHTML = '';
+    }
     return;
   }
 
-  container.innerHTML = products.map(p => renderCatalogProductCard(p, currentUser)).join('');
+  const visibleProducts = products.slice(0, visibleProductCount);
+  const hasMore = visibleProductCount < products.length;
+
+  container.innerHTML = visibleProducts.map(p => renderCatalogProductCard(p, currentUser)).join('');
 
   bindCatalogProductCards(container, {
     allProducts,
@@ -443,6 +539,29 @@ function renderProducts() {
       await loadProducts();
     }),
   });
+
+  if (!loadMoreWrap) return;
+
+  if (hasMore) {
+    const remaining = products.length - visibleProducts.length;
+    const nextCount = Math.min(getCatalogPageSize(), remaining);
+    loadMoreWrap.hidden = false;
+    loadMoreWrap.innerHTML = `
+      <p class="catalog-load-more-meta">Показано ${visibleProducts.length} из ${products.length}</p>
+      <button type="button" class="btn btn-outline catalog-load-more-btn" id="catalog-load-more-btn">
+        Показать ещё ${nextCount}
+      </button>`;
+    loadMoreWrap.querySelector('#catalog-load-more-btn')?.addEventListener('click', () => {
+      visibleProductCount += getCatalogPageSize();
+      renderProducts({ resetPagination: false });
+    });
+  } else if (products.length > getCatalogPageSize()) {
+    loadMoreWrap.hidden = false;
+    loadMoreWrap.innerHTML = `<p class="catalog-load-more-meta">Показаны все товары (${products.length})</p>`;
+  } else {
+    loadMoreWrap.hidden = true;
+    loadMoreWrap.innerHTML = '';
+  }
 }
 
 async function loadProducts() {
@@ -481,12 +600,11 @@ function setupSearch() {
     await Favorites.load();
   }
 
-  loadHomeContent();
-  loadCategories();
+  await Promise.all([loadHomeContent(), loadCategories(), loadFeaturedOrder()]);
   setupCatalogDropdownDismiss();
   setupCatalogCategoryDropdown();
   setupCatalogFilterDropdown();
-  loadProducts();
+  await loadProducts();
   showStoredCheckoutNotice();
   setupSearch();
 })();
