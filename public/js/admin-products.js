@@ -794,6 +794,11 @@ function setupProductFilters() {
     productDateSort = e.target.value || 'default';
     loadProductsList();
   });
+
+  document.getElementById('download-price-list')?.addEventListener('click', () => {
+    const categoryId = productCategoryFilter || 'all';
+    window.location.href = `/api/admin/products/export?category_id=${encodeURIComponent(categoryId)}`;
+  });
 }
 
 function syncProductStatusTabs() {

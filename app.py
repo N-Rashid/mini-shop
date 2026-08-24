@@ -4,9 +4,11 @@ import sys
 import uuid
 from datetime import datetime, timezone, timedelta
 from functools import wraps
+from html import escape
+from urllib.parse import quote
 
 from flask import (
-    Flask, jsonify, request, send_from_directory, session
+    Flask, jsonify, request, send_from_directory, session, Response
 )
 import bcrypt
 from werkzeug.security import check_password_hash
@@ -1736,6 +1738,225 @@ def admin_list_products():
         result.append(d)
     conn.close()
     return jsonify(result)
+
+
+def _export_price_value(value):
+    if value is None or value == '':
+        return ''
+    return f'{float(value):.2f}'.replace('.', ',')
+
+
+def _export_pack_price(product):
+    if product.get('is_on_sale') and product.get('sale_price_pack') is not None:
+        return _export_price_value(product.get('sale_price_pack'))
+    return _export_price_value(product.get('price_pack'))
+
+
+def _export_piece_price(product):
+    if not product.get('allow_piece_sale'):
+        return ''
+    if product.get('is_on_sale') and product.get('sale_price_piece') is not None:
+        return _export_price_value(product.get('sale_price_piece'))
+    return _export_price_value(product.get('price_piece'))
+
+
+def _product_visible_category_ids(product, featured_id):
+    return [
+        cat_id for cat_id in (product.get('category_ids') or [])
+        if featured_id is None or cat_id != featured_id
+    ]
+
+
+def _sort_products_in_category(products, category_id):
+    cat_key = str(category_id)
+
+    def sort_key(product):
+        orders = product.get('category_sort_orders') or {}
+        return (
+            orders.get(cat_key, product.get('sort_order') or 0),
+            product.get('id') or 0,
+        )
+
+    return sorted(products, key=sort_key)
+
+
+def _get_price_list_sections(conn, category_id='all'):
+    featured_id = get_featured_home_category_id(conn)
+    categories = [
+        row_to_dict(row) for row in conn.execute('''
+            SELECT id, name, sort_order
+            FROM categories
+            WHERE deleted_at IS NULL AND COALESCE(is_featured_home, 0) = 0
+            ORDER BY sort_order ASC, id ASC
+        ''').fetchall()
+    ]
+    rows = conn.execute(
+        f'''
+        SELECT {PRODUCT_SELECT}, deleted_at
+        FROM products
+        WHERE deleted_at IS NULL
+        ORDER BY sort_order ASC, id ASC
+        '''
+    ).fetchall()
+    products = [map_product(conn, row) for row in rows]
+
+    if category_id == 'none':
+        uncategorized = [
+            product for product in products
+            if not _product_visible_category_ids(product, featured_id)
+        ]
+        if not uncategorized:
+            return []
+        return [{
+            'name': 'Без категории',
+            'products': _sort_products_in_category(uncategorized, '0'),
+        }]
+
+    if category_id and category_id != 'all':
+        try:
+            cat_id = int(category_id)
+        except (TypeError, ValueError):
+            cat_id = None
+        if not cat_id or cat_id == featured_id:
+            return []
+        category = next((cat for cat in categories if cat['id'] == cat_id), None)
+        if not category:
+            return []
+        in_category = [
+            product for product in products
+            if cat_id in _product_visible_category_ids(product, featured_id)
+        ]
+        if not in_category:
+            return []
+        return [{
+            'name': category['name'],
+            'products': _sort_products_in_category(in_category, cat_id),
+        }]
+
+    sections = []
+    used = set()
+    for category in categories:
+        cat_id = category['id']
+        in_category = [
+            product for product in products
+            if cat_id in _product_visible_category_ids(product, featured_id)
+            and product['id'] not in used
+        ]
+        in_category = _sort_products_in_category(in_category, cat_id)
+        if not in_category:
+            continue
+        for product in in_category:
+            used.add(product['id'])
+        sections.append({
+            'name': category['name'],
+            'products': in_category,
+        })
+    return sections
+
+
+def _build_price_list_doc(sections):
+    price_list_date = datetime.now().strftime('%d.%m.%Y')
+    table_head = (
+        '<table class="price-table" cellspacing="0" cellpadding="0">'
+        '<colgroup>'
+        '<col class="col-num">'
+        '<col class="col-name">'
+        '<col class="col-price">'
+        '<col class="col-price">'
+        '</colgroup>'
+        '<tr>'
+        '<th width="28">№</th>'
+        '<th>Товар</th>'
+        '<th width="38">за шт.</th>'
+        '<th width="38">за уп.</th>'
+        '</tr>'
+    )
+    parts = [
+        '<!DOCTYPE html>',
+        '<html xmlns:o="urn:schemas-microsoft-com:office:office" '
+        'xmlns:w="urn:schemas-microsoft-com:office:word">',
+        '<head><meta charset="utf-8">',
+        '<style>',
+        '@page { size: A4; margin: 14mm 12mm; }',
+        'body { font-family: Calibri, Arial, sans-serif; font-size: 8pt; line-height: 1.2; margin: 0; }',
+        'h1 { font-size: 11pt; margin: 0 0 4pt; font-weight: bold; }',
+        '.price-list-date { font-size: 8pt; color: #444; margin: 0 0 8pt; }',
+        'h2 { font-size: 9pt; margin: 4pt 0 2pt; font-weight: bold; }',
+        'h2:first-of-type { margin-top: 6pt; }',
+        '.price-table-wrap { width: 88%; max-width: 15.5cm; margin: 0 auto 2pt; }',
+        'table.price-table { border-collapse: collapse; table-layout: fixed; width: 100%; font-size: 8pt; }',
+        'table.price-table col.col-num { width: 28pt; }',
+        'table.price-table col.col-name { width: auto; }',
+        'table.price-table col.col-price { width: 38pt; }',
+        'table.price-table th, table.price-table td { border: 0.5pt solid #666; padding: 2pt 4pt; vertical-align: top; }',
+        'table.price-table th { background: #f2f2f2; font-weight: bold; text-align: center; font-size: 7.5pt; }',
+        'table.price-table td.num { text-align: center; font-size: 8pt; }',
+        'table.price-table td.name { word-wrap: break-word; font-size: 8.5pt; }',
+        'table.price-table td.price { text-align: right; white-space: nowrap; font-size: 8pt; }',
+        '</style>',
+        '</head><body>',
+        '<h1>Прайс-лист</h1>',
+        f'<p class="price-list-date">от {price_list_date}</p>',
+    ]
+
+    if not sections:
+        parts.append('<p>Нет товаров для выгрузки.</p>')
+    else:
+        global_index = 0
+        for section in sections:
+            parts.append(f'<h2>{escape(section["name"])}</h2>')
+            parts.append('<div class="price-table-wrap">')
+            parts.append(table_head)
+            for product in section['products']:
+                global_index += 1
+                piece_price = _export_piece_price(product) or '—'
+                pack_price = _export_pack_price(product) or '—'
+                parts.append(
+                    '<tr>'
+                    f'<td class="num">{global_index}</td>'
+                    f'<td class="name">{escape(product.get("name") or "")}</td>'
+                    f'<td class="price">{piece_price}</td>'
+                    f'<td class="price">{pack_price}</td>'
+                    '</tr>'
+                )
+            parts.append('</table></div>')
+
+    parts.append('</body></html>')
+    return '\n'.join(parts)
+
+
+@app.get('/api/admin/products/export')
+@require_admin
+def admin_export_products():
+    category_id = request.args.get('category_id', 'all') or 'all'
+    conn = get_db()
+    sections = _get_price_list_sections(conn, category_id)
+
+    if category_id == 'none':
+        filename = 'price-list-bez-kategorii.doc'
+    elif category_id and category_id != 'all':
+        category = conn.execute(
+            'SELECT name, COALESCE(is_featured_home, 0) AS is_featured_home FROM categories WHERE id = ?',
+            (int(category_id),),
+        ).fetchone()
+        if category and category['is_featured_home']:
+            filename = 'price-list.doc'
+        else:
+            slug = secure_filename(category['name'] if category else 'category') or 'category'
+            filename = f'price-list-{slug}.doc'
+    else:
+        filename = 'price-list-all.doc'
+    conn.close()
+
+    doc_data = _build_price_list_doc(sections)
+    disposition = (
+        f"attachment; filename=price-list.doc; filename*=UTF-8''{quote(filename)}"
+    )
+    return Response(
+        doc_data,
+        mimetype='application/msword; charset=utf-8',
+        headers={'Content-Disposition': disposition},
+    )
 
 
 @app.post('/api/admin/products')

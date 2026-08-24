@@ -2478,6 +2478,10 @@ body.has-mini-cart-bar:not(.cart-page) .site-footer {
   margin-bottom: 16px;
 }
 
+.admin-products-export-hint {
+  margin: -8px 0 16px;
+}
+
 .admin-products-toolbar .search-input-wrap {
   flex: 1 1 200px;
   min-width: 0;
