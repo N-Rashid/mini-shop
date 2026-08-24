@@ -441,13 +441,9 @@ function sortProductsHomeDefault(list) {
     ? list.filter(p => !featuredSet.has(String(p.id)))
     : list;
 
-  const hits = rest.filter(p => p.is_bestseller);
-  const regular = rest.filter(p => !p.is_bestseller);
-
   return [
     ...featured,
-    ...sortProductsByCategoryGroups(hits),
-    ...sortProductsByCategoryGroups(regular),
+    ...sortProductsByCategoryGroups(rest),
   ];
 }
 
@@ -550,7 +546,8 @@ function renderProducts({ resetPagination = true } = {}) {
     allProducts,
     currentUser,
     onEdit: (productId) => openProductEditModal(productId, allProducts, async () => {
-      await loadProducts();
+      await loadFeaturedOrder();
+      await loadProducts({ preservePagination: true, preserveScroll: true });
     }),
   });
 
@@ -578,13 +575,29 @@ function renderProducts({ resetPagination = true } = {}) {
   }
 }
 
-async function loadProducts() {
+async function loadProducts({ preservePagination = false, preserveScroll = false } = {}) {
   const container = document.getElementById('products');
+  const savedVisibleCount = visibleProductCount;
+  const savedScrollY = window.scrollY;
 
   try {
     allProducts = await api('/api/products');
     setMiniCartProductsCache(allProducts);
-    renderProducts();
+
+    if (preservePagination && savedVisibleCount > getCatalogPageSize()) {
+      visibleProductCount = savedVisibleCount;
+      renderProducts({ resetPagination: false });
+    } else {
+      renderProducts();
+    }
+
+    if (preserveScroll) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          window.scrollTo(0, savedScrollY);
+        });
+      });
+    }
   } catch (err) {
     container.innerHTML = `<p class="alert alert-error">${err.message}</p>`;
   }
