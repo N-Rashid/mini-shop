@@ -371,40 +371,6 @@ function usesHomeCategorySort() {
   return !searchQuery && !activeCategory && !activeTag && productSort === 'default';
 }
 
-function getProductPrimaryCategoryId(product) {
-  const ids = product.categories?.length
-    ? product.categories.filter(c => !c.is_featured_home).map(c => String(c.id))
-    : productCategoryIds(product);
-  if (!ids.length) return null;
-
-  let bestId = ids[0];
-  let bestOrder = Infinity;
-  ids.forEach(id => {
-    const cat = catalogCategories.find(c => String(c.id) === id);
-    const order = cat ? (cat.sort_order ?? cat.id) : 999999;
-    if (order < bestOrder || (order === bestOrder && Number(id) < Number(bestId))) {
-      bestOrder = order;
-      bestId = id;
-    }
-  });
-  return bestId;
-}
-
-function getCategorySortOrderForProduct(product) {
-  const catId = getProductPrimaryCategoryId(product);
-  if (!catId) return 999999;
-  const cat = catalogCategories.find(c => String(c.id) === catId);
-  return cat ? (cat.sort_order ?? cat.id) : 999999;
-}
-
-function productOrderInPrimaryCategory(product) {
-  const catId = getProductPrimaryCategoryId(product);
-  if (!catId) return product.sort_order || 0;
-  const orders = product.category_sort_orders || {};
-  if (orders[catId] != null) return orders[catId];
-  return product.sort_order || 0;
-}
-
 function compareCatalogAvailability(a, b) {
   const aOut = a.in_stock === false ? 1 : 0;
   const bOut = b.in_stock === false ? 1 : 0;
@@ -418,16 +384,51 @@ function compareBestsellerRank(a, b) {
   return aHit - bHit;
 }
 
-function sortProductsByCategoryGroups(list) {
+function getCategoriesInDisplayOrder() {
+  return [...catalogCategories].sort(
+    (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.id - b.id
+  );
+}
+
+function productOrderInCategory(product, categoryId) {
+  const catId = String(categoryId);
+  const orders = product.category_sort_orders || {};
+  if (orders[catId] != null) return orders[catId];
+  return product.sort_order || 0;
+}
+
+function sortProductsInCategory(list, categoryId) {
   return [...list].sort((a, b) => {
     const stockCmp = compareCatalogAvailability(a, b);
     if (stockCmp) return stockCmp;
-
-    const catCmp = getCategorySortOrderForProduct(a) - getCategorySortOrderForProduct(b);
-    if (catCmp) return catCmp;
-
-    return productOrderInPrimaryCategory(a) - productOrderInPrimaryCategory(b) || a.id - b.id;
+    return productOrderInCategory(a, categoryId) - productOrderInCategory(b, categoryId) || a.id - b.id;
   });
+}
+
+function sortProductsByCategorySequence(list) {
+  const used = new Set();
+  const result = [];
+
+  for (const cat of getCategoriesInDisplayOrder()) {
+    const catId = String(cat.id);
+    const inCategory = list.filter(p => {
+      if (used.has(String(p.id))) return false;
+      return productHasCategory(p, catId);
+    });
+    sortProductsInCategory(inCategory, catId).forEach(p => {
+      used.add(String(p.id));
+      result.push(p);
+    });
+  }
+
+  const leftover = list.filter(p => !used.has(String(p.id)));
+  leftover.sort((a, b) => {
+    const stockCmp = compareCatalogAvailability(a, b);
+    if (stockCmp) return stockCmp;
+    return (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id;
+  });
+
+  return result.concat(leftover);
 }
 
 function sortProductsHomeDefault(list) {
@@ -443,7 +444,7 @@ function sortProductsHomeDefault(list) {
 
   return [
     ...featured,
-    ...sortProductsByCategoryGroups(rest),
+    ...sortProductsByCategorySequence(rest),
   ];
 }
 
