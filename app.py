@@ -1752,12 +1752,26 @@ def _export_pack_price(product):
     return _export_price_value(product.get('price_pack'))
 
 
-def _export_piece_price(product):
-    if not product.get('allow_piece_sale'):
-        return ''
+def _effective_piece_price(product):
     if product.get('is_on_sale') and product.get('sale_price_piece') is not None:
-        return _export_price_value(product.get('sale_price_piece'))
-    return _export_price_value(product.get('price_piece'))
+        return product.get('sale_price_piece')
+
+    piece = product.get('price_piece')
+    if piece is not None and float(piece) > 0:
+        return piece
+
+    pieces = int(product.get('pieces_per_pack') or product.get('pieces_per_box') or 1)
+    pack = product.get('price_pack')
+    if pieces > 1 and pack is not None and float(pack) > 0:
+        return float(pack) / pieces
+    return None
+
+
+def _export_piece_price(product):
+    price = _effective_piece_price(product)
+    if price is None or float(price) <= 0:
+        return ''
+    return _export_price_value(price)
 
 
 def _product_visible_category_ids(product, featured_id):
