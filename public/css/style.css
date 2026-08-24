@@ -529,6 +529,19 @@ nav a.active {
   padding-right: 42px;
 }
 
+.search-input-wrap input[type="search"]::-webkit-search-cancel-button,
+.search-input-wrap input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+
+.search-input-wrap input[type="search"]::-ms-clear {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 .search-input-clear {
   position: absolute;
   top: 50%;

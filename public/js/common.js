@@ -372,6 +372,11 @@ function getSelectedCategoryIds(form) {
 function initSearchClear(input) {
   if (!input || input.closest('.search-input-wrap')) return input;
 
+  if (input.type === 'search') {
+    input.type = 'text';
+    input.setAttribute('inputmode', 'search');
+  }
+
   const wrap = document.createElement('div');
   wrap.className = 'search-input-wrap';
   input.parentNode.insertBefore(wrap, input);
