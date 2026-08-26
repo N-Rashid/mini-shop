@@ -1767,6 +1767,13 @@ def _effective_piece_price(product):
     return None
 
 
+def _export_pieces_per_pack(product):
+    pieces = int(product.get('pieces_per_pack') or product.get('pieces_per_box') or 0)
+    if pieces <= 0:
+        return ''
+    return str(pieces)
+
+
 def _export_piece_price(product):
     price = _effective_piece_price(product)
     if price is None or float(price) <= 0:
@@ -1876,12 +1883,14 @@ def _build_price_list_doc(sections):
         '<col class="col-num">'
         '<col class="col-name">'
         '<col class="col-price">'
+        '<col class="col-qty">'
         '<col class="col-price">'
         '</colgroup>'
         '<tr>'
         '<th width="28">№</th>'
         '<th>Товар</th>'
         '<th width="38">за шт.</th>'
+        '<th width="28">шт/уп</th>'
         '<th width="38">за уп.</th>'
         '</tr>'
     )
@@ -1902,9 +1911,10 @@ def _build_price_list_doc(sections):
         'table.price-table col.col-num { width: 28pt; }',
         'table.price-table col.col-name { width: auto; }',
         'table.price-table col.col-price { width: 38pt; }',
+        'table.price-table col.col-qty { width: 28pt; }',
         'table.price-table th, table.price-table td { border: 0.5pt solid #666; padding: 2pt 4pt; vertical-align: top; }',
         'table.price-table th { background: #f2f2f2; font-weight: bold; text-align: center; font-size: 7.5pt; }',
-        'table.price-table td.num { text-align: center; font-size: 8pt; }',
+        'table.price-table td.num, table.price-table td.qty { text-align: center; font-size: 8pt; }',
         'table.price-table td.name { word-wrap: break-word; font-size: 8.5pt; }',
         'table.price-table td.price { text-align: right; white-space: nowrap; font-size: 8pt; }',
         '</style>',
@@ -1924,12 +1934,14 @@ def _build_price_list_doc(sections):
             for product in section['products']:
                 global_index += 1
                 piece_price = _export_piece_price(product) or '—'
+                pieces_in_pack = _export_pieces_per_pack(product) or '—'
                 pack_price = _export_pack_price(product) or '—'
                 parts.append(
                     '<tr>'
                     f'<td class="num">{global_index}</td>'
                     f'<td class="name">{escape(product.get("name") or "")}</td>'
                     f'<td class="price">{piece_price}</td>'
+                    f'<td class="qty">{pieces_in_pack}</td>'
                     f'<td class="price">{pack_price}</td>'
                     '</tr>'
                 )
