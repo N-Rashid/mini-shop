@@ -4,9 +4,8 @@
   "description": "Мини-магазин на HTML/CSS/JS с SQLite",
   "main": "server.js",
   "scripts": {
-    "start": "python app.py",
-    "start:node": "node server.js",
-    "dev": "python app.py"
+    "dev": "python app.py",
+    "start:prod": "gunicorn --workers 3 --bind 127.0.0.1:8000 app:app"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

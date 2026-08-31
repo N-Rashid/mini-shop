@@ -60,14 +60,57 @@ DEFAULT_HOME_SUBTITLE = (
     'Большой Ассортимент. Низкие Цены. Доставка. Мороженое для Кафе и Ресторанов'
 )
 
+def _env_flag(name, default=False):
+    val = os.environ.get(name, '').strip().lower()
+    if val in ('1', 'true', 'yes', 'on'):
+        return True
+    if val in ('0', 'false', 'no', 'off'):
+        return False
+    return default
+
+
+IS_PRODUCTION = _env_flag('MINISHOP_PRODUCTION', False)
+_DEFAULT_SECRET = 'mini-shop-secret-change-in-production'
+
+
+def _load_secret_key():
+    secret = os.environ.get('MINISHOP_SECRET_KEY', '').strip()
+    if secret:
+        return secret
+    if IS_PRODUCTION:
+        raise RuntimeError(
+            'MINISHOP_SECRET_KEY is not set. '
+            'Create deploy/minishop.env on the server (see deploy/minishop.env.example).'
+        )
+    print(
+        'WARNING: MINISHOP_SECRET_KEY is not set; using dev-only secret.',
+        file=sys.stderr,
+    )
+    return _DEFAULT_SECRET
+
+
 app = Flask(__name__, static_folder=PUBLIC_DIR, static_url_path='')
-app.secret_key = 'mini-shop-secret-change-in-production'
+app.secret_key = _load_secret_key()
 app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_REFRESH_EACH_REQUEST'] = True
+if IS_PRODUCTION:
+    app.config['SESSION_COOKIE_SECURE'] = True
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 SESSION_DEFAULT_DAYS = 1
+
+
+@app.after_request
+def add_security_headers(response):
+    if not IS_PRODUCTION:
+        return response
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+    response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    return response
 
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -2656,5 +2699,14 @@ def admin_user_orders(user_id):
 
 
 if __name__ == '__main__':
-    print('Мороженое Избербаш: http://localhost:3000')
-    app.run(host='0.0.0.0', port=3000, debug=True)
+    host = os.environ.get('FLASK_HOST', '127.0.0.1')
+    port = int(os.environ.get('FLASK_PORT', '3000'))
+    debug = _env_flag('FLASK_DEBUG', False)
+    print(f'Мороженое Избербаш (dev): http://{host}:{port}')
+    if host in ('0.0.0.0', '::'):
+        print(
+            'WARNING: dev server is exposed on all interfaces; '
+            'use gunicorn on 127.0.0.1:8000 in production.',
+            file=sys.stderr,
+        )
+    app.run(host=host, port=port, debug=debug)

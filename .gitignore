@@ -6,6 +6,8 @@ db/*.db
 db/*.db-journal
 db/*.db-wal
 db/*.db-shm
+db/backups/
+deploy/minishop.env
 tools/smoke_test.py
 uploads server/
 uploads-watermarked/

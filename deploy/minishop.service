@@ -1,0 +1,15 @@
+[Unit]
+Description=Mini Shop (morozhenoe-izberbash.ru)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/mini-shop
+Environment=MINISHOP_PRODUCTION=1
+EnvironmentFile=-/root/mini-shop/deploy/minishop.env
+ExecStart=/root/mini-shop/venv/bin/gunicorn --workers 3 --bind 127.0.0.1:8000 --timeout 120 app:app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
